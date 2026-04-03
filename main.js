@@ -9,7 +9,7 @@ if (process.platform === 'linux') {
 const path = require('path');
 const { getTaskbarGeometry, getCharacterY } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
-const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey } = require('./sessions/agent-session');
+const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getToolsEnabled, setToolsEnabled } = require('./sessions/agent-session');
 const ClaudeSession = require('./sessions/claude-session');
 const CodexSession = require('./sessions/codex-session');
 const CopilotSession = require('./sessions/copilot-session');
@@ -282,6 +282,19 @@ class Character {
     // Start session (vision needs API key)
     if (providerKey === 'vision') {
       const apiKey = getApiKey();
+      // Set the tool approval function before starting
+      this.session.setApprovalFunction(async (message) => {
+        const result = await dialog.showMessageBox({
+          type: 'question',
+          buttons: ['Allow', 'Deny'],
+          defaultId: 1,
+          title: 'Tool Approval Required',
+          message: 'The assistant wants to perform an action:',
+          detail: message,
+          cancelId: 1
+        });
+        return result.response === 0; // 0 = Allow
+      });
       this.session.start(apiKey);
     } else {
       this.session.start();
@@ -628,6 +641,24 @@ function rebuildTrayMenu() {
       type: 'checkbox',
       checked: isSoundsEnabled(),
       click: () => { toggleSounds(); rebuildTrayMenu(); }
+    },
+    {
+      label: 'Enable Tools',
+      type: 'checkbox',
+      checked: getToolsEnabled(),
+      click: () => {
+        setToolsEnabled(!getToolsEnabled());
+        // Recreate sessions with tools toggled
+        characters.forEach(c => {
+          if (c.session) {
+            c.session.terminate();
+            c.session.removeAllListeners();
+            c.session = null;
+          }
+          c.createSession();
+        });
+        rebuildTrayMenu();
+      }
     },
     {
       label: 'Provider',

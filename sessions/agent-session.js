@@ -48,6 +48,8 @@ class SettingsStore {
     this._provider = 'vision';
     this._theme = 'Peach';
     this._apiKey = '';
+    this._toolsEnabled = true;
+    this._mcpServers = {};
     this._load();
   }
 
@@ -57,6 +59,8 @@ class SettingsStore {
       this._provider = store.provider || 'vision';
       this._theme = store.theme || 'Peach';
       this._apiKey = store.apiKey || '';
+      this._toolsEnabled = store.toolsEnabled !== false; // default true
+      this._mcpServers = store.mcpServers || {};
     } catch (e) {
       // defaults
     }
@@ -66,7 +70,9 @@ class SettingsStore {
     Store.save({
       provider: this._provider,
       theme: this._theme,
-      apiKey: this._apiKey
+      apiKey: this._apiKey,
+      toolsEnabled: this._toolsEnabled,
+      mcpServers: this._mcpServers
     });
   }
 
@@ -78,6 +84,12 @@ class SettingsStore {
 
   get apiKey() { return this._apiKey; }
   set apiKey(v) { this._apiKey = v; this._save(); }
+
+  get toolsEnabled() { return this._toolsEnabled; }
+  set toolsEnabled(v) { this._toolsEnabled = v; this._save(); }
+
+  get mcpServers() { return this._mcpServers; }
+  set mcpServers(v) { this._mcpServers = v; this._save(); }
 }
 
 const settings = new SettingsStore();
@@ -119,6 +131,22 @@ function setApiKey(key) {
   settings.apiKey = key;
 }
 
+function getToolsEnabled() {
+  return settings.toolsEnabled;
+}
+
+function setToolsEnabled(enabled) {
+  settings.toolsEnabled = enabled;
+}
+
+function getMcpServers() {
+  return settings.mcpServers;
+}
+
+function setMcpServers(configs) {
+  settings.mcpServers = configs;
+}
+
 function getTitleString(providerKey, format) {
   const info = getProviderInfo(providerKey);
   switch (format) {
@@ -140,5 +168,9 @@ module.exports = {
   setCurrentTheme,
   getApiKey,
   setApiKey,
+  getToolsEnabled,
+  setToolsEnabled,
+  getMcpServers,
+  setMcpServers,
   getTitleString
 };

@@ -1,10 +1,11 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleGenAI } = require('@google/genai');
 const EventEmitter = require('events');
+const McpClientManager = require('./mcp-client');
 
 /**
- * Gemini Vision API Session.
- * Uses @google/generative-ai SDK for multimodal (text + screenshot) queries.
- * Supports bounding box detection for UI element location.
+ * Gemini Vision API Session with MCP Tool Support.
+ * Uses @google/genai SDK for multimodal (text + screenshot) queries
+ * with function calling for tool execution.
  */
 
 const SYSTEM_PROMPT = `You are a helpful desktop assistant that can see the user's screen.
@@ -13,6 +14,12 @@ When the user asks a question, analyze the screenshot provided and give a clear,
 FORMATTING RULES:
 - Use markdown formatting in your responses
 - Be concise and direct
+
+TOOL USAGE:
+- You have access to various tools (functions). Use them when the user's request requires an action.
+- For example: opening URLs, composing emails, creating calendar events, reading clipboard, etc.
+- When you use a tool, the result will be sent back to you. Use it to form your final response.
+- For simple questions that don't need tools, just answer directly.
 
 BOUNDING BOX MODE:
 When the user asks "how to" do something on their screen (e.g., "how to create a pull request", 
@@ -41,39 +48,48 @@ class VisionSession extends EventEmitter {
   constructor(screenCapture) {
     super();
     this.screenCapture = screenCapture; // reference to ScreenCapture service
-    this.genAI = null;
-    this.model = null;
-    this.chatHistory = [];
+    this.ai = null;
     this.isRunning = false;
     this.isBusy = false;
     this.history = [];
     this.currentResponseText = '';
+    this.mcpClient = new McpClientManager();
+    this._conversationHistory = []; // Gemini conversation context
   }
 
   /** Initialize with API key */
-  start(apiKey) {
+  async start(apiKey) {
     if (!apiKey) {
       this.emit('error', 'Gemini API key not set. Go to tray menu → Set API Key.');
       return;
     }
 
     try {
-      this.genAI = new GoogleGenerativeAI(apiKey);
-      this.model = this.genAI.getGenerativeModel({
-        model: 'gemini-2.5-pro',
-        systemInstruction: SYSTEM_PROMPT
-      });
+      this.ai = new GoogleGenAI({ apiKey });
+
+      // Initialize MCP client with built-in tools
+      await this.mcpClient.initialize();
+
       this.isRunning = true;
       this.emit('sessionReady');
-      console.log('[VisionSession] Initialized with gemini-2.5-pro');
+      console.log('[VisionSession] Initialized with gemini-2.0-flash + MCP tools');
+      console.log(`[VisionSession] Available tools: ${this.mcpClient.getAllFunctionDeclarations().map(t => t.name).join(', ')}`);
     } catch (err) {
       this.emit('error', `Failed to initialize Gemini API: ${err.message}`);
     }
   }
 
+  /**
+   * Set the approval function for dangerous tool calls.
+   * @param {function} fn - Async function(message) => boolean
+   */
+  setApprovalFunction(fn) {
+    this.mcpClient.setApprovalFunction(fn);
+  }
+
   /** Send a message with the latest screenshot */
   async send(message) {
-    if (!this.model) {
+    if (!this.ai) {
       this.emit('error', 'Vision session not started. Set your Gemini API key first.');
       return;
     }
@@ -91,8 +107,8 @@ class VisionSession extends EventEmitter {
       // Build the multimodal prompt parts
       const parts = [];
 
-      // Add screenshot if available — capture fresh one right now
-      const screenshot = this.screenCapture ? await this.screenCapture.captureNow() : null;
+      // Add screenshot if available — disabled to save API limits
+      const screenshot = null; // this.screenCapture ? await this.screenCapture.captureNow() : null;
       if (screenshot) {
         parts.push({
           inlineData: {
@@ -105,21 +121,17 @@ class VisionSession extends EventEmitter {
         parts.push({ text: message });
       }
 
-      // Stream the response
-      const result = await this.model.generateContentStream(parts);
+      // Add user message to conversation history
+      this._conversationHistory.push({ role: 'user', parts });
 
-      for await (const chunk of result.stream) {
-        const text = chunk.text();
-        if (text) {
-          this.currentResponseText += text;
-          
-          // Check for bounding box data in the stream
-          this._checkForBoundingBoxes(text);
+      // Get tool declarations
+      const functionDeclarations = this.mcpClient.getAllFunctionDeclarations();
+      const tools = functionDeclarations.length > 0
+        ? [{ functionDeclarations }]
+        : undefined;
 
-          // Emit text for display
-          this.emit('text', text);
-        }
-      }
+      // Run the function calling loop
+      await this._generateWithToolLoop(tools);
 
       // Save completed response
       if (this.currentResponseText.trim()) {
@@ -139,9 +151,11 @@ class VisionSession extends EventEmitter {
     } catch (err) {
       this.isBusy = false;
       this.currentResponseText = '';
+      
+      console.error('[VisionSession] API Error:', err, err.message, err.status, JSON.stringify(err));
 
       if (err.message && err.message.includes('429')) {
-        this.emit('error', '⏳ Rate limited. Please wait a moment and try again.');
+        this.emit('error', `⏳ Rate limited. Detail: ${err.message}`);
       } else if (err.message && err.message.includes('API_KEY')) {
         this.emit('error', '🔑 Invalid API key. Check your Gemini API key in settings.');
       } else {
@@ -151,9 +165,116 @@ class VisionSession extends EventEmitter {
     }
   }
 
+  /**
+   * Core function calling loop:
+   * 1. Send to Gemini (with tools)
+   * 2. If response contains functionCall → execute tool → send result → repeat
+   * 3. If response contains text → stream to UI → done
+   */
+  async _generateWithToolLoop(tools, maxIterations = 5) {
+    for (let i = 0; i < maxIterations; i++) {
+      // Stream response from Gemini
+      const responseStream = await this.ai.models.generateContentStream({
+        model: 'gemini-2.5-flash',
+        contents: this._conversationHistory,
+        config: {
+          tools,
+          systemInstruction: SYSTEM_PROMPT
+        }
+      });
+
+      let functionCalls = [];
+      let modelParts = [];
+      let textAccumulated = '';
+
+      // Consume the stream
+      for await (const chunk of responseStream) {
+        // Stream text to UI as it arrives
+        const text = chunk.text;
+        if (text) {
+          textAccumulated += text;
+          this.currentResponseText += text;
+          this._checkForBoundingBoxes(text);
+          this.emit('text', text);
+        }
+
+        // Collect function calls
+        if (chunk.functionCalls && chunk.functionCalls.length > 0) {
+          functionCalls.push(...chunk.functionCalls);
+        }
+
+        // Collect model response parts for history
+        if (chunk.candidates && chunk.candidates[0]?.content?.parts) {
+          modelParts.push(...chunk.candidates[0].content.parts);
+        }
+      }
+
+      // Add model response to conversation history
+      if (modelParts.length > 0) {
+        this._conversationHistory.push({ role: 'model', parts: modelParts });
+      } else if (textAccumulated) {
+        this._conversationHistory.push({ role: 'model', parts: [{ text: textAccumulated }] });
+      }
+
+      // If no function calls, we're done — text has been streamed
+      if (functionCalls.length === 0) {
+        return;
+      }
+
+      // Execute function calls and send results back
+      const functionResponseParts = [];
+
+      for (const call of functionCalls) {
+        const toolName = call.name;
+        const toolArgs = call.args || {};
+
+        // Emit tool use event to UI
+        const argsSummary = Object.entries(toolArgs)
+          .map(([k, v]) => `${k}: ${typeof v === 'string' ? v.substring(0, 50) : v}`)
+          .join(', ');
+        this.emit('toolUse', toolName, toolArgs);
+        this.history.push({ role: 'toolUse', text: `${toolName}(${argsSummary})` });
+
+        // Execute the tool
+        let result;
+        try {
+          result = await this.mcpClient.executeToolCall(toolName, toolArgs);
+        } catch (err) {
+          result = { success: false, error: err.message };
+        }
+
+        // Emit tool result to UI
+        const resultSummary = result.success !== false
+          ? (result.message || JSON.stringify(result).substring(0, 120))
+          : `Error: ${result.error}`;
+        this.emit('toolResult', resultSummary, result.success === false);
+        this.history.push({ role: 'toolResult', text: resultSummary });
+
+        // Build function response part
+        functionResponseParts.push({
+          functionResponse: {
+            name: toolName,
+            response: result
+          }
+        });
+      }
+
+      // Add function responses to conversation for next iteration
+      this._conversationHistory.push({
+        role: 'user',
+        parts: functionResponseParts
+      });
+
+      // Loop continues — Gemini will process the tool results
+    }
+
+    // If we hit max iterations, emit a warning
+    this.emit('text', '\n\n⚠️ Tool loop limit reached.');
+  }
+
   /** Send without screenshot (text-only mode) */
   async sendTextOnly(message) {
-    if (!this.model) {
+    if (!this.ai) {
       this.emit('error', 'Vision session not started.');
       return;
     }
@@ -163,15 +284,14 @@ class VisionSession extends EventEmitter {
     this.currentResponseText = '';
 
     try {
-      const result = await this.model.generateContentStream(message);
+      this._conversationHistory.push({ role: 'user', parts: [{ text: message }] });
 
-      for await (const chunk of result.stream) {
-        const text = chunk.text();
-        if (text) {
-          this.currentResponseText += text;
-          this.emit('text', text);
-        }
-      }
+      const functionDeclarations = this.mcpClient.getAllFunctionDeclarations();
+      const tools = functionDeclarations.length > 0
+        ? [{ functionDeclarations }]
+        : undefined;
+
+      await this._generateWithToolLoop(tools);
 
       if (this.currentResponseText.trim()) {
         this.history.push({ role: 'assistant', text: this.currentResponseText.trim() });
@@ -191,8 +311,10 @@ class VisionSession extends EventEmitter {
   terminate() {
     this.isRunning = false;
     this.isBusy = false;
-    this.genAI = null;
-    this.model = null;
+    this.ai = null;
+    this._conversationHistory = [];
+    // Shutdown MCP client
+    this.mcpClient.shutdown().catch(() => {});
   }
 
   /** Check streaming text for bounding box markers (real-time) */
