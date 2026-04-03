@@ -1,0 +1,27 @@
+{
+  "name": "desktop-assistant",
+  "version": "1.0.0",
+  "description": "Tiny AI companions that live on your taskbar — cross-platform port of lil-agents",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron . --no-sandbox --enable-features=WebRTCPipeWireCapturer",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "electron": "^36.3.1"
+  },
+  "build": {
+    "appId": "com.desktop-assistant.app",
+    "productName": "Desktop Assistant",
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}
