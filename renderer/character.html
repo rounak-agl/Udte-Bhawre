@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      -webkit-app-region: no-drag;
+      user-select: none;
+    }
+    #character {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      cursor: pointer;
+      image-rendering: pixelated;
+    }
+    .sprite-container {
+      width: 48px;
+      height: 64px;
+      position: relative;
+    }
+    /* Cute simple character using CSS shapes */
+    .char-body {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 28px;
+      height: 32px;
+      border-radius: 14px 14px 6px 6px;
+      background: var(--char-color, #66b88d);
+      transition: transform 0.1s;
+    }
+    .char-head {
+      position: absolute;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--char-color, #66b88d);
+    }
+    .char-eye {
+      position: absolute;
+      width: 6px;
+      height: 7px;
+      border-radius: 50%;
+      background: #1a1a2e;
+      top: 12px;
+    }
+    .char-eye.left { left: 7px; }
+    .char-eye.right { right: 7px; }
+    .char-eye-shine {
+      position: absolute;
+      width: 2px;
+      height: 2px;
+      border-radius: 50%;
+      background: white;
+      top: 2px;
+      right: 1px;
+    }
+    .char-mouth {
+      position: absolute;
+      width: 8px;
+      height: 4px;
+      border-radius: 0 0 4px 4px;
+      background: #1a1a2e;
+      bottom: 7px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+    .char-cheek {
+      position: absolute;
+      width: 6px;
+      height: 4px;
+      border-radius: 50%;
+      opacity: 0.4;
+      bottom: 9px;
+    }
+    .char-cheek.left { left: 3px; background: #ff8fab; }
+    .char-cheek.right { right: 3px; background: #ff8fab; }
+    /* Legs */
+    .char-leg {
+      position: absolute;
+      bottom: -6px;
+      width: 8px;
+      height: 10px;
+      border-radius: 0 0 4px 4px;
+      background: var(--char-color-dark, #4a9b72);
+    }
+    .char-leg.left { left: 4px; }
+    .char-leg.right { right: 4px; }
+
+    /* Walk animation */
+    @keyframes walk-left {
+      0%, 100% { transform: rotate(0deg); }
+      25% { transform: rotate(-15deg); }
+      75% { transform: rotate(15deg); }
+    }
+    @keyframes walk-right {
+      0%, 100% { transform: rotate(0deg); }
+      25% { transform: rotate(15deg); }
+      75% { transform: rotate(-15deg); }
+    }
+    @keyframes bounce {
+      0%, 100% { transform: translateX(-50%) translateY(0); }
+      50% { transform: translateX(-50%) translateY(-3px); }
+    }
+    .walking .char-body {
+      animation: bounce 0.35s ease-in-out infinite;
+    }
+    .walking .char-leg.left {
+      animation: walk-left 0.35s ease-in-out infinite;
+      transform-origin: top center;
+    }
+    .walking .char-leg.right {
+      animation: walk-right 0.35s ease-in-out infinite;
+      transform-origin: top center;
+    }
+    .walking .char-head {
+      animation: bounce 0.35s ease-in-out infinite;
+    }
+
+    /* Idle blink */
+    @keyframes blink {
+      0%, 94%, 100% { transform: scaleY(1); }
+      97% { transform: scaleY(0.1); }
+    }
+    .char-eye {
+      animation: blink 4s ease-in-out infinite;
+    }
+
+    /* Flip for direction */
+    .facing-left {
+      transform: translateX(-50%) scaleX(-1);
+    }
+    .facing-right {
+      transform: translateX(-50%) scaleX(1);
+    }
+  </style>
+</head>
+<body>
+  <div id="character" class="facing-right">
+    <div class="sprite-container">
+      <div class="char-head">
+        <div class="char-eye left"><div class="char-eye-shine"></div></div>
+        <div class="char-eye right"><div class="char-eye-shine"></div></div>
+        <div class="char-mouth"></div>
+        <div class="char-cheek left"></div>
+        <div class="char-cheek right"></div>
+      </div>
+      <div class="char-body">
+        <div class="char-leg left"></div>
+        <div class="char-leg right"></div>
+      </div>
+    </div>
+  </div>
+  <script src="character.js"></script>
+</body>
+</html>

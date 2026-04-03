@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      user-select: none;
+    }
+    #bubble {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 6px 14px;
+      border-radius: var(--bubble-radius, 12px);
+      background: var(--bubble-bg, rgba(26, 26, 26, 0.92));
+      border: 1.5px solid var(--bubble-border, rgba(255, 102, 0, 0.6));
+      color: var(--bubble-text, rgba(179, 179, 179, 1));
+      font-family: 'Inter', -apple-system, sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      animation: bubbleIn 0.25s ease-out;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    /* Tail/pointer */
+    #bubble::after {
+      content: '';
+      position: absolute;
+      bottom: -7px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 7px solid transparent;
+      border-right: 7px solid transparent;
+      border-top: 7px solid var(--bubble-bg, rgba(26, 26, 26, 0.92));
+    }
+    .completion {
+      border-color: var(--bubble-completion-border, rgba(77, 204, 77, 0.7)) !important;
+      color: var(--bubble-completion-text, rgba(77, 217, 77, 1)) !important;
+    }
+    @keyframes bubbleIn {
+      from { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
+      to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    }
+    /* Thinking dots animation */
+    .thinking-dots::after {
+      content: '';
+      animation: dots 1.5s infinite;
+    }
+    @keyframes dots {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+    }
+  </style>
+</head>
+<body>
+  <div id="bubble"></div>
+  <script>
+    const bubbleEl = document.getElementById('bubble');
+
+    window.assistant.onBubbleShow((data) => {
+      bubbleEl.textContent = data.text || '...';
+      bubbleEl.className = data.isCompletion ? 'completion' : '';
+
+      // Apply theme colors
+      if (data.theme) {
+        const t = data.theme;
+        document.documentElement.style.setProperty('--bubble-bg', t.bubbleBg || '');
+        document.documentElement.style.setProperty('--bubble-border', t.bubbleBorder || '');
+        document.documentElement.style.setProperty('--bubble-text', t.bubbleText || '');
+        document.documentElement.style.setProperty('--bubble-completion-border', t.bubbleCompletionBorder || '');
+        document.documentElement.style.setProperty('--bubble-completion-text', t.bubbleCompletionText || '');
+        document.documentElement.style.setProperty('--bubble-radius', t.bubbleCornerRadius || '12px');
+      }
+
+      document.body.style.display = 'block';
+    });
+
+    window.assistant.onBubbleHide(() => {
+      document.body.style.display = 'none';
+    });
+  </script>
+</body>
+</html>

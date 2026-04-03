@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="chat.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div id="chat-container" class="theme-peach">
+    <!-- Title bar -->
+    <div id="title-bar">
+      <span id="title-text">Claude</span>
+      <div id="title-actions">
+        <button id="btn-copy" title="Copy last response">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+          </svg>
+        </button>
+        <button id="btn-close" title="Close">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Separator -->
+    <div id="separator"></div>
+
+    <!-- Messages area -->
+    <div id="messages">
+      <div id="welcome-message" class="message system-message">
+        <div class="message-content">
+          <span class="welcome-emoji">👋</span> Hi! I'm your desktop assistant. Ask me anything, or type <code>/help</code> for commands.
+        </div>
+      </div>
+    </div>
+
+    <!-- Input area -->
+    <div id="input-area">
+      <input type="text" id="input-field" placeholder="Ask Claude..." autocomplete="off" spellcheck="false">
+      <button id="btn-send" title="Send">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+  <script src="chat.js"></script>
+</body>
+</html>
