@@ -1,4 +1,11 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, clipboard, dialog } = require('electron');
+
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-transparent-visuals');
+  app.commandLine.appendSwitch('disable-gpu');
+  app.disableHardwareAcceleration();
+}
+
 const path = require('path');
 const { getTaskbarGeometry, getCharacterY } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
@@ -17,7 +24,7 @@ let tray = null;
 let characters = [];
 let onboardingDone = false;
 let overlayWindow = null;
-const screenCapture = new ScreenCapture({ interval: 3000, maxBuffer: 10 });
+const screenCapture = new ScreenCapture({ maxBuffer: 3 });
 
 // Thinking bubble phrases
 const THINKING_PHRASES = [
@@ -103,6 +110,9 @@ class Character {
     this.flyStartTime = 0;
     this.flyDuration = 500;
     this.savedTaskbarPos = null;
+
+    // Internal flags
+    this._destroying = false;
   }
 
   createCharacterWindow() {
@@ -134,10 +144,12 @@ class Character {
       });
     });
 
-    // Prevent closing
+    // Prevent closing (unless intentionally destroying)
     this.charWindow.on('close', (e) => {
-      e.preventDefault();
-      this.charWindow.hide();
+      if (!this._destroying) {
+        e.preventDefault();
+        this.charWindow.hide();
+      }
     });
   }
 
@@ -496,6 +508,7 @@ class Character {
   }
 
   destroy() {
+    this._destroying = true;
     this.stopThinking();
     this.hideBubble();
     if (this.session) {
@@ -533,7 +546,7 @@ app.whenReady().then(() => {
     color: '#ff6600',
     colorDark: '#cc5200',
     startPosition: 0.7,
-    yOffset: -7,
+    yOffset: -3,
     initialPause: 8000 + Math.random() * 6000,
     isOnboarding: false
   });
@@ -624,7 +637,7 @@ function rebuildTrayMenu() {
         checked: p.key === currentProviderKey,
         click: () => {
           setCurrentProvider(p.key);
-          // Terminate existing sessions so they restart with new provider
+          // Terminate existing sessions and recreate with new provider
           characters.forEach(c => {
             if (c.session) {
               c.session.terminate();
@@ -633,7 +646,11 @@ function rebuildTrayMenu() {
             }
             if (c.chatWindow && !c.chatWindow.isDestroyed()) {
               c.chatWindow.webContents.send('provider-change', p.key);
+              // Clear any stale typing indicators
+              c.chatWindow.webContents.send('chat-turn-complete');
             }
+            // Immediately recreate session with new provider
+            c.createSession();
           });
           rebuildTrayMenu();
         }
@@ -693,7 +710,7 @@ function promptForApiKey() {
   const currentKey = getApiKey();
   const maskedKey = currentKey ? currentKey.substring(0, 8) + '...' : '';
 
-  inputWin.loadURL(`data:text/html,
+  const htmlContent = `
     <html><body style="font-family:Segoe UI,sans-serif;padding:20px;background:#1a1a2e;color:#fff">
     <h3 style="margin:0 0 10px">Gemini API Key</h3>
     <p style="font-size:12px;color:#aaa;margin:0 0 10px">Get one free at <a href="https://aistudio.google.com/apikey" style="color:#00d4aa">aistudio.google.com</a></p>
@@ -707,28 +724,43 @@ function promptForApiKey() {
       function save() {
         const key = document.getElementById('key').value.trim();
         if (key) {
-          fetch('http://localhost:0/save-key?key=' + encodeURIComponent(key)).catch(() => {});
           document.title = 'APIKEY:' + key;
+          // Don't close immediately — let the title change event fire first.
+          // The main process will close this window after processing the key.
+        } else {
+          window.close();
         }
-        window.close();
       }
       document.getElementById('key').addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
     </script>
     </body></html>
-  `);
+  `;
+  inputWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
 
   inputWin.on('page-title-updated', (e, title) => {
     if (title.startsWith('APIKEY:')) {
       const key = title.substring(7);
       setApiKey(key);
-      // Restart vision sessions with new key
+      console.log('[API Key] Updated. Recreating all sessions with new key.');
+
+      // Terminate old sessions and immediately recreate with the new key
       characters.forEach(c => {
         if (c.session) {
           c.session.terminate();
           c.session.removeAllListeners();
           c.session = null;
         }
+        if (c.chatWindow && !c.chatWindow.isDestroyed()) {
+          c.chatWindow.webContents.send('api-key-changed');
+        }
+        // Immediately recreate the session so the new key is active
+        c.createSession();
       });
+
+      // Close the input dialog from the main process (safe — title event already fired)
+      if (!inputWin.isDestroyed()) {
+        inputWin.destroy();
+      }
     }
   });
 }
@@ -820,6 +852,18 @@ ipcMain.on('request-position', (event) => {
 // ── Vision / Overlay IPC ──
 ipcMain.on('set-api-key', (event, key) => {
   setApiKey(key);
+  // Recreate sessions so they use the new key
+  characters.forEach(c => {
+    if (c.session) {
+      c.session.terminate();
+      c.session.removeAllListeners();
+      c.session = null;
+    }
+    if (c.chatWindow && !c.chatWindow.isDestroyed()) {
+      c.chatWindow.webContents.send('api-key-changed');
+    }
+    c.createSession();
+  });
 });
 
 ipcMain.handle('get-api-key', () => {
@@ -842,19 +886,61 @@ ipcMain.on('hide-overlay', () => {
   hideOverlay();
 });
 
-ipcMain.on('overlay-set-interactive', (event, interactive) => {
+ipcMain.on('update-step-panel', (event, data) => {
+  if (!stepPanelWindow || stepPanelWindow.isDestroyed()) createStepPanelWindow();
+  
+  // Add screen bounds offset if primary display is not at 0,0 (multi-monitor)
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const absX = primaryDisplay.bounds.x + Math.round(data.x);
+  const absY = primaryDisplay.bounds.y + Math.round(data.y);
+
+  stepPanelWindow.setBounds({ x: absX, y: absY, width: 280, height: 160 });
+  stepPanelWindow.show();
+  stepPanelWindow.webContents.send('update-step-panel-data', data);
+});
+
+ipcMain.on('hide-step-panel', () => {
+  if (stepPanelWindow && !stepPanelWindow.isDestroyed()) stepPanelWindow.hide();
+});
+
+ipcMain.on('step-panel-action', (event, action) => {
   if (overlayWindow && !overlayWindow.isDestroyed()) {
-    if (interactive) {
-      overlayWindow.setIgnoreMouseEvents(false);
-    } else {
-      overlayWindow.setIgnoreMouseEvents(true, { forward: true });
-    }
+    overlayWindow.webContents.send('step-panel-action', action);
   }
 });
 
+let stepPanelWindow = null;
+
+function createStepPanelWindow() {
+  stepPanelWindow = new BrowserWindow({
+    width: 280,
+    height: 160,
+    transparent: true,
+    frame: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    hasShadow: false,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  stepPanelWindow.loadFile(path.join(__dirname, 'renderer', 'step-panel.html'));
+  stepPanelWindow.on('closed', () => { stepPanelWindow = null; });
+}
+
 // ── Overlay Window ──
 function createOverlayWindow() {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { x, y, width: sw, height: sh } = primaryDisplay.bounds;
+
   overlayWindow = new BrowserWindow({
+    x: x,
+    y: y,
+    width: sw,
+    height: sh,
     fullscreen: true,
     transparent: true,
     frame: false,
@@ -870,8 +956,14 @@ function createOverlayWindow() {
     }
   });
 
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  overlayWindow.setIgnoreMouseEvents(true); // Fully click-through on all OSes
+
   overlayWindow.loadFile(path.join(__dirname, 'renderer', 'overlay.html'));
+
+  // Send screen dimensions to overlay for accurate bounding box positioning
+  overlayWindow.webContents.on('did-finish-load', () => {
+    overlayWindow.webContents.send('screen-dimensions', { width: sw, height: sh });
+  });
 
   overlayWindow.on('closed', () => {
     overlayWindow = null;
@@ -883,12 +975,10 @@ function showOverlay() {
     createOverlayWindow();
   }
   overlayWindow.show();
-  // Make step panel clickable but rest click-through
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true });
+  overlayWindow.setIgnoreMouseEvents(true);
 }
 
 function hideOverlay() {
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.hide();
-  }
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
+  if (stepPanelWindow && !stepPanelWindow.isDestroyed()) stepPanelWindow.hide();
 }

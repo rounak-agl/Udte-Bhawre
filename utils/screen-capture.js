@@ -1,88 +1,107 @@
-const { BrowserWindow, ipcMain, nativeImage } = require('electron');
-const path = require('path');
+const { desktopCapturer } = require('electron');
 
 /**
- * Periodic WebRTC screen capture service using a background renderer.
+ * On-demand screen capture service.
+ * Captures screenshots when requested, stores in memory only.
+ * All screenshots are deleted when session closes — zero disk footprint.
  */
 class ScreenCapture {
   constructor(options = {}) {
-    this.captureInterval = options.interval || 3000;
-    this.maxBufferSize = options.maxBuffer || 10;
-    this.screenshots = [];
+    this.maxBufferSize = options.maxBuffer || 3;    // keep last 3
+    this.screenshots = [];      // { timestamp, thumbnail (NativeImage), width, height }
     this.isRunning = false;
-    this.captureWindow = null;
-    this._cleanupId = null;
-    
-    // Set up singleton IPC listener for incoming frames
-    ipcMain.on('screenshot-captured', (event, dataUrl) => {
-      this._handleScreenshot(dataUrl);
-    });
   }
 
+  /** Initialize the capture service (detect Linux tools etc.) */
   start() {
     if (this.isRunning) return;
     this.isRunning = true;
-    
-    // Create a hidden browser window that uses standard browser webRTC
-    this.captureWindow = new BrowserWindow({
-      show: false, // The portal prompt will still appear natively
-      webPreferences: {
-        preload: path.join(__dirname, '..', 'preload.js'),
-        contextIsolation: true,
-        nodeIntegration: false
+
+    if (process.platform === 'linux' && !this.linuxCaptureCmd) {
+      const { execSync } = require('child_process');
+      const desktop = (process.env.XDG_CURRENT_DESKTOP || '').toLowerCase();
+      const tools = [];
+      
+      if (desktop.includes('gnome')) {
+        tools.push({ cmd: 'gdbus', format: 'gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Screenshot.Screenshot "false" "false" "%s"' });
+        tools.push({ cmd: 'gnome-screenshot', format: 'gnome-screenshot -f "%s"' });
+      } else if (desktop.includes('kde')) {
+        tools.push({ cmd: 'spectacle', format: 'spectacle -m -b -n -o "%s"' });
       }
-    });
+      
+      tools.push(
+        { cmd: 'gnome-screenshot', format: 'gnome-screenshot -f "%s"' },
+        { cmd: 'spectacle', format: 'spectacle -m -b -n -o "%s"' },
+        { cmd: 'grim', format: 'grim "%s"' },
+        { cmd: 'scrot', format: 'scrot -z "%s"' }
+      );
+      
+      for (const tool of tools) {
+        try {
+          execSync(`command -v ${tool.cmd}`, { stdio: 'ignore' });
+          this.linuxCaptureCmd = tool.format;
+          console.log(`[ScreenCapture] Detected Linux screenshot tool: ${tool.cmd}`);
+          break;
+        } catch (e) {
+          // not found, try next
+        }
+      }
+      
+      if (!this.linuxCaptureCmd) {
+        console.log('[ScreenCapture] No native Linux screenshot tool found. Will fallback to desktopCapturer.');
+      }
+    }
 
-    this.captureWindow.loadFile(path.join(__dirname, '..', 'renderer', 'capture.html'));
-
-    this._cleanupId = setInterval(() => {
-      this._cleanup();
-    }, 30000);
-
-    console.log('[ScreenCapture] Started WebRTC renderer window');
+    console.log('[ScreenCapture] Initialized (on-demand mode)');
   }
 
+  /** Stop capture and clear ALL screenshots from memory */
   stop() {
-    if (this.captureWindow && !this.captureWindow.isDestroyed()) {
-      this.captureWindow.close();
-      this.captureWindow = null;
-    }
-    if (this._cleanupId) {
-      clearInterval(this._cleanupId);
-      this._cleanupId = null;
-    }
+    // Clear all screenshots from memory
     this.screenshots = [];
     this.isRunning = false;
-    console.log('[ScreenCapture] Stopped');
+    console.log('[ScreenCapture] Stopped, all screenshots cleared');
   }
 
+  /** Get the most recent screenshot as base64 PNG */
   getLatest() {
     if (this.screenshots.length === 0) return null;
     const latest = this.screenshots[this.screenshots.length - 1];
     return {
-      base64: latest.base64,
+      base64: latest.thumbnail.toPNG().toString('base64'),
       timestamp: latest.timestamp,
       width: latest.width,
       height: latest.height
     };
   }
 
+  /** Get latest as raw buffer (more efficient for API calls) */
   getLatestBuffer() {
     if (this.screenshots.length === 0) return null;
     const latest = this.screenshots[this.screenshots.length - 1];
     return {
-      buffer: Buffer.from(latest.base64, 'base64'),
+      buffer: latest.thumbnail.toPNG(),
       timestamp: latest.timestamp,
       width: latest.width,
       height: latest.height
     };
   }
 
+  /** Capture a fresh screenshot right now and return it */
   async captureNow() {
-    // If we're using interval, just fetch the latest automatically buffered frame
-    return this.getLatest();
+    const result = await this._capture();
+    if (result) {
+      return {
+        base64: result.thumbnail.toPNG().toString('base64'),
+        timestamp: result.timestamp,
+        width: result.width,
+        height: result.height
+      };
+    }
+    return null;
   }
 
+  /** Get screenshot count (for debug) */
   getBufferInfo() {
     return {
       count: this.screenshots.length,
@@ -93,37 +112,72 @@ class ScreenCapture {
     };
   }
 
-  _handleScreenshot(dataUrl) {
-    const timestamp = Date.now();
-    const img = nativeImage.createFromDataURL(dataUrl);
-    const size = img.getSize();
-    
-    // DataUrl format: data:image/jpeg;base64,...
-    const base64str = dataUrl.split('base64,')[1];
-    
-    const screenshot = {
-      timestamp,
-      thumbnail: img,
-      width: size.width,
-      height: size.height,
-      base64: base64str
-    };
-    
-    this.screenshots.push(screenshot);
-    while (this.screenshots.length > this.maxBufferSize) {
-      this.screenshots.shift();
+  /** Internal: capture the primary screen */
+  async _capture() {
+    try {
+      let thumbnail = null;
+
+      if (process.platform === 'linux' && this.linuxCaptureCmd) {
+        const { exec } = require('child_process');
+        const path = require('path');
+        const os = require('os');
+        const fs = require('fs');
+        const { nativeImage } = require('electron');
+        const util = require('util');
+        const execAsync = util.promisify(exec);
+
+        const tmpPath = path.join(os.tmpdir(), `screenshot-${Date.now()}.png`);
+        try {
+          const cmd = this.linuxCaptureCmd.replace('%s', tmpPath);
+          await execAsync(cmd);
+          
+          // Wait briefly to ensure file I/O is fully flushed to disk by the system
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          if (fs.existsSync(tmpPath)) {
+            thumbnail = nativeImage.createFromPath(tmpPath);
+            fs.unlinkSync(tmpPath);
+          }
+        } catch (e) {
+          console.error('[ScreenCapture] CLI Capture Error:', e.message);
+          if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+        }
+      }
+
+      if (!thumbnail || thumbnail.isEmpty()) {
+        const sources = await desktopCapturer.getSources({
+          types: ['screen'],
+          thumbnailSize: { width: 1920, height: 1080 }
+        });
+
+        if (sources.length === 0) return null;
+        thumbnail = sources[0].thumbnail;
+      }
+
+      if (!thumbnail || thumbnail.isEmpty()) return null;
+
+      const size = thumbnail.getSize();
+
+      const screenshot = {
+        timestamp: Date.now(),
+        thumbnail: thumbnail,
+        width: size.width,
+        height: size.height
+      };
+
+      // Circular buffer: push new, trim oldest
+      this.screenshots.push(screenshot);
+      while (this.screenshots.length > this.maxBufferSize) {
+        this.screenshots.shift();
+      }
+
+      return screenshot;
+    } catch (err) {
+      console.error('[ScreenCapture] Capture error:', err.message);
+      return null;
     }
   }
 
-  _cleanup() {
-    const cutoff = Date.now() - 30000;
-    const before = this.screenshots.length;
-    this.screenshots = this.screenshots.filter(s => s.timestamp > cutoff);
-    const removed = before - this.screenshots.length;
-    if (removed > 0) {
-      console.log(`[ScreenCapture] Cleaned up ${removed} old screenshots`);
-    }
-  }
 }
 
 module.exports = ScreenCapture;

@@ -46,7 +46,17 @@ class CodexSession extends EventEmitter {
       });
 
       this.process.stderr.on('data', (data) => {
-        this.emit('error', data.toString('utf8'));
+        const errText = data.toString('utf8').trim();
+        if (!errText) return;
+        if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\s]+$/.test(errText)) return;
+        if (errText.includes('429') || errText.includes('rate')) {
+          this.emit('error', '⏳ Rate limited. Please wait a moment and try again.');
+          return;
+        }
+        const firstLine = errText.split('\n')[0].substring(0, 200);
+        if (firstLine.includes('Error') || firstLine.includes('error') || firstLine.includes('not found')) {
+          this.emit('error', firstLine);
+        }
       });
 
       this.process.on('exit', () => {
@@ -97,7 +107,17 @@ class CodexSession extends EventEmitter {
       });
 
       this.process.stderr.on('data', (data) => {
-        this.emit('error', data.toString('utf8'));
+        const errText = data.toString('utf8').trim();
+        if (!errText) return;
+        if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\s]+$/.test(errText)) return;
+        if (errText.includes('429') || errText.includes('rate')) {
+          this.emit('error', '⏳ Rate limited. Please wait a moment and try again.');
+          return;
+        }
+        const firstLine = errText.split('\n')[0].substring(0, 200);
+        if (firstLine.includes('Error') || firstLine.includes('error') || firstLine.includes('not found')) {
+          this.emit('error', firstLine);
+        }
       });
 
       this.process.on('exit', () => {

@@ -17,27 +17,21 @@ FORMATTING RULES:
 BOUNDING BOX MODE:
 When the user asks "how to" do something on their screen (e.g., "how to create a pull request", 
 "how to open settings"), you MUST:
-1. Analyze the screenshot to identify the UI elements they need to interact with
+1. Analyze the screenshot to identify the exact UI elements they need to interact with
 2. Provide step-by-step instructions
 3. For EACH step, include a JSON block with the bounding box of the UI element to interact with
 
 Format each step EXACTLY like this:
-Step 1: Click the "Code" button in the top right
+Step 1: Click the "Terminal" menu item in the top menu bar
 \`\`\`bbox
-{"step":1,"instruction":"Click the Code button","element":{"x":0.85,"y":0.12,"width":0.08,"height":0.03},"action":"click"}
+{"step":1,"instruction":"Click the Terminal menu item","element":[20, 250, 45, 310],"action":"click"}
 \`\`\`
 
-Step 2: Select "Open with GitHub Desktop"  
-\`\`\`bbox
-{"step":2,"instruction":"Select Open with GitHub Desktop","element":{"x":0.75,"y":0.25,"width":0.15,"height":0.03},"action":"click"}
-\`\`\`
-
-BOUNDING BOX COORDINATE RULES:
-- All coordinates are NORMALIZED (0.0 to 1.0) relative to screen dimensions
-- x = left edge of element (0.0 = left of screen, 1.0 = right)
-- y = top edge of element (0.0 = top of screen, 1.0 = bottom)
-- width = element width as fraction of screen width
-- height = element height as fraction of screen height
+BOUNDING BOX COORDINATE RULES (CRITICAL):
+- You MUST use the native array format: [ymin, xmin, ymax, xmax]
+- Each coordinate MUST be an integer from 0 to 1000 representing the fraction of the screen resolution (e.g. 500 is the exact center of the screen).
+- 0,0 is the top-left corner. 1000,1000 is the bottom-right corner.
+- Do NOT use width/height or objects. You must use the [ymin, xmin, ymax, xmax] integer array format.
 - action = "click", "type", "scroll", "right-click", or "hover"
 
 If the screen doesn't show the relevant UI for the user's question, just answer with text normally.
@@ -66,12 +60,12 @@ class VisionSession extends EventEmitter {
     try {
       this.genAI = new GoogleGenerativeAI(apiKey);
       this.model = this.genAI.getGenerativeModel({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-2.5-pro',
         systemInstruction: SYSTEM_PROMPT
       });
       this.isRunning = true;
       this.emit('sessionReady');
-      console.log('[VisionSession] Initialized with gemini-2.5-flash');
+      console.log('[VisionSession] Initialized with gemini-2.5-pro');
     } catch (err) {
       this.emit('error', `Failed to initialize Gemini API: ${err.message}`);
     }
@@ -84,6 +78,11 @@ class VisionSession extends EventEmitter {
       return;
     }
 
+    if (this.isBusy) {
+      this.emit('error', 'Still processing the previous request. Please wait.');
+      return;
+    }
+
     this.history.push({ role: 'user', text: message });
     this.isBusy = true;
     this.currentResponseText = '';
@@ -92,8 +91,8 @@ class VisionSession extends EventEmitter {
       // Build the multimodal prompt parts
       const parts = [];
 
-      // Add screenshot if available
-      const screenshot = this.screenCapture ? this.screenCapture.getLatest() : null;
+      // Add screenshot if available — capture fresh one right now
+      const screenshot = this.screenCapture ? await this.screenCapture.captureNow() : null;
       if (screenshot) {
         parts.push({
           inlineData: {
@@ -210,19 +209,36 @@ class VisionSession extends EventEmitter {
     while ((match = bboxRegex.exec(text)) !== null) {
       try {
         const stepData = JSON.parse(match[1].trim());
-        if (stepData.element && typeof stepData.element.x === 'number') {
-          steps.push({
-            step: stepData.step || steps.length + 1,
-            instruction: stepData.instruction || '',
-            element: {
-              x: Math.max(0, Math.min(1, stepData.element.x)),
-              y: Math.max(0, Math.min(1, stepData.element.y)),
-              width: Math.max(0.01, Math.min(1, stepData.element.width || 0.05)),
-              height: Math.max(0.01, Math.min(1, stepData.element.height || 0.03))
-            },
-            action: stepData.action || 'click'
-          });
+        let x, y, w, h;
+        
+        if (Array.isArray(stepData.element) && stepData.element.length === 4) {
+          // Native Gemini spatial format: [ymin, xmin, ymax, xmax] (0-1000 scale)
+          const [ymin, xmin, ymax, xmax] = stepData.element;
+          y = ymin / 1000;
+          x = xmin / 1000;
+          h = (ymax - ymin) / 1000;
+          w = (xmax - xmin) / 1000;
+        } else if (stepData.element && typeof stepData.element.x === 'number') {
+          // Fallback legacy object format
+          x = stepData.element.x;
+          y = stepData.element.y;
+          w = stepData.element.width || 0.05;
+          h = stepData.element.height || 0.03;
+        } else {
+          continue;
         }
+
+        steps.push({
+          step: stepData.step || steps.length + 1,
+          instruction: stepData.instruction || '',
+          element: {
+            x: Math.max(0, Math.min(1, x)),
+            y: Math.max(0, Math.min(1, y)),
+            width: Math.max(0.01, Math.min(1, w)),
+            height: Math.max(0.01, Math.min(1, h))
+          },
+          action: stepData.action || 'click'
+        });
       } catch (e) {
         // Invalid JSON in bbox block, skip
       }

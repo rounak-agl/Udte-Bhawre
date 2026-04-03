@@ -1,14 +1,17 @@
 const container = document.getElementById('overlay-container');
-const stepPanel = document.getElementById('step-panel');
-const stepBadge = document.getElementById('step-badge');
-const stepTitle = document.getElementById('step-title');
-const stepInstruction = document.getElementById('step-instruction');
-const btnNext = document.getElementById('btn-next');
-const btnDone = document.getElementById('btn-done');
-const btnDismiss = document.getElementById('btn-dismiss');
 
 let steps = [];
 let currentStepIndex = 0;
+let screenW = window.innerWidth;
+let screenH = window.innerHeight;
+
+// Receive actual screen dimensions from main process
+if (window.assistant.onScreenDimensions) {
+  window.assistant.onScreenDimensions((dims) => {
+    screenW = dims.width;
+    screenH = dims.height;
+  });
+}
 
 // ─── IPC listeners ───
 window.assistant.onShowStepGuide((stepsData) => {
@@ -24,17 +27,18 @@ window.assistant.onShowBoundingBox((bbox) => {
 
 window.assistant.onHideBoundingBox(() => {
   clearBoundingBoxes();
-  hideStepPanel();
+  window.assistant.hideStepPanel();
+});
+
+window.assistant.onStepPanelAction((action) => {
+  if (action === 'next') showStep(currentStepIndex + 1);
+  else if (action === 'done' || action === 'dismiss') dismiss();
 });
 
 // ─── Bounding box rendering ───
 function addBoundingBox(element, stepNum, isActive = false) {
   const bbox = document.createElement('div');
   bbox.className = `bbox ${isActive ? 'active' : ''}`;
-
-  // Convert normalized coords to pixels
-  const screenW = window.innerWidth;
-  const screenH = window.innerHeight;
 
   bbox.style.left = `${element.x * screenW}px`;
   bbox.style.top = `${element.y * screenH}px`;
@@ -73,26 +77,9 @@ function showStep(index) {
     addBoundingBox(s.element, s.step, i === index);
   });
 
-  // Update step panel text
-  stepBadge.textContent = step.step;
-  stepTitle.textContent = `Step ${step.step} of ${steps.length}`;
-  stepInstruction.textContent = step.instruction;
-
-  // Show/hide next/done buttons
-  if (index >= steps.length - 1) {
-    btnNext.classList.add('hidden');
-    btnDone.classList.remove('hidden');
-  } else {
-    btnNext.classList.remove('hidden');
-    btnDone.classList.add('hidden');
-  }
-
   // ── Position the panel next to the active bounding box ──
-  const screenW = window.innerWidth;
-  const screenH = window.innerHeight;
   const panelW = 280;
-  // Estimate height or use actual if visible (approx 140px)
-  const panelH = stepPanel.offsetHeight || 140; 
+  const panelH = 160; 
   
   const bboxX = step.element.x * screenW;
   const bboxY = step.element.y * screenH;
@@ -107,9 +94,9 @@ function showStep(index) {
   if (panelLeft + panelW > screenW - 20) {
     panelLeft = bboxX - panelW - 20;
   }
-  // If it still goes off screen (bbox is very wide), try above or below
-  if (panelLeft < 20 && panelLeft + panelW > screenW - 20) {
-    panelLeft = bboxX;
+  // If it goes off screen on the left, try below or above
+  if (panelLeft < 20) {
+    panelLeft = Math.max(20, bboxX);
     panelTop = bboxY + bboxH + 20;
     // If it goes off screen on bottom, place above
     if (panelTop + panelH > screenH - 20) {
@@ -121,10 +108,14 @@ function showStep(index) {
   panelTop = Math.max(20, Math.min(panelTop, screenH - panelH - 20));
   panelLeft = Math.max(20, Math.min(panelLeft, screenW - panelW - 20));
 
-  stepPanel.style.left = `${panelLeft}px`;
-  stepPanel.style.top = `${panelTop}px`;
-
-  stepPanel.classList.remove('hidden');
+  window.assistant.updateStepPanel({
+    x: panelLeft,
+    y: panelTop,
+    badge: step.step,
+    title: `Step ${step.step} of ${steps.length}`,
+    instruction: step.instruction,
+    isLast: index >= steps.length - 1
+  });
 
   // Tell main process to fly character to this element
   window.assistant.flyToElement({
@@ -135,13 +126,9 @@ function showStep(index) {
   });
 }
 
-function hideStepPanel() {
-  stepPanel.classList.add('hidden');
-}
-
 function dismiss() {
   clearBoundingBoxes();
-  hideStepPanel();
+  window.assistant.hideStepPanel();
   steps = [];
   currentStepIndex = 0;
 
@@ -149,35 +136,3 @@ function dismiss() {
   window.assistant.returnCharacter();
   window.assistant.hideOverlay();
 }
-
-// ─── Button handlers ───
-btnNext.addEventListener('click', () => {
-  showStep(currentStepIndex + 1);
-});
-
-btnDone.addEventListener('click', () => {
-  dismiss();
-});
-
-btnDismiss.addEventListener('click', () => {
-  dismiss();
-});
-
-// ESC key to dismiss
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') dismiss();
-});
-
-// ─── Interactivity toggle ───
-// To allow clicks on the panel through the transparent window
-stepPanel.addEventListener('mouseenter', () => {
-  if (window.assistant && window.assistant.overlaySetInteractive) {
-    window.assistant.overlaySetInteractive(true);
-  }
-});
-
-stepPanel.addEventListener('mouseleave', () => {
-  if (window.assistant && window.assistant.overlaySetInteractive) {
-    window.assistant.overlaySetInteractive(false);
-  }
-});

@@ -95,7 +95,7 @@ class GeminiSession extends EventEmitter {
       ];
 
       if (process.platform === 'win32' && this._entryScript) {
-        const nodePath = 'C:\\Program Files\\nodejs\\node.exe';
+        const nodePath = process.execPath;
         if (fs.existsSync(nodePath)) {
           this.process = spawn(nodePath, [this._entryScript, ...args], {
             cwd: home,
