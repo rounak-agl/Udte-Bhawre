@@ -12,9 +12,9 @@ function getTaskbarGeometry() {
   // Determine taskbar position by comparing bounds vs workArea
   let position = 'bottom';
   let taskbarHeight = 0;
-  let taskbarWidth = 0;
+  let taskbarWidth = screenW;
   let taskbarX = 0;
-  let taskbarY = 0;
+  let taskbarY = screenH;
 
   const bottomGap = screenH - (workArea.y + workArea.height);
   const topGap = workArea.y;
@@ -47,43 +47,15 @@ function getTaskbarGeometry() {
     taskbarY = 0;
   }
 
-  // Calculate the "walk zone" — where characters walk
-  // Characters walk above the taskbar (for bottom) or next to it
-  let walkZone = {};
-  switch (position) {
-    case 'bottom':
-      walkZone = {
-        x: Math.round(screenW * 0.15),
-        y: taskbarY,
-        width: Math.round(screenW * 0.7),
-        height: 80
-      };
-      break;
-    case 'top':
-      walkZone = {
-        x: Math.round(screenW * 0.15),
-        y: topGap,
-        width: Math.round(screenW * 0.7),
-        height: 80
-      };
-      break;
-    case 'left':
-      walkZone = {
-        x: leftGap,
-        y: Math.round(screenH * 0.3),
-        width: 80,
-        height: Math.round(screenH * 0.4)
-      };
-      break;
-    case 'right':
-      walkZone = {
-        x: taskbarX - 80,
-        y: Math.round(screenH * 0.3),
-        width: 80,
-        height: Math.round(screenH * 0.4)
-      };
-      break;
-  }
+  // Always make the character walk at the bottom of the work area,
+  // regardless of where the primary taskbar is detected.
+  // This ensures they stay on the bottom dock or bottom of the screen.
+  let walkZone = {
+    x: Math.round(screenW * 0.15),
+    y: workArea.y + workArea.height,
+    width: Math.round(screenW * 0.7),
+    height: 80
+  };
 
   return {
     position,
@@ -102,14 +74,7 @@ function getTaskbarGeometry() {
  * Get the Y position for a character above the taskbar (bottom position).
  */
 function getCharacterY(taskbarGeometry, characterHeight = 64) {
-  switch (taskbarGeometry.position) {
-    case 'bottom':
-      return taskbarGeometry.taskbarY - characterHeight;
-    case 'top':
-      return taskbarGeometry.workArea.y;
-    default:
-      return taskbarGeometry.screenH - characterHeight - taskbarGeometry.taskbarHeight;
-  }
+  return taskbarGeometry.workArea.y + taskbarGeometry.workArea.height - characterHeight;
 }
 
 module.exports = { getTaskbarGeometry, getCharacterY };

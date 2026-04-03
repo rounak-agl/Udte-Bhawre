@@ -17,24 +17,19 @@ window.assistant.onCharacterConfig((config) => {
 let isWalking = false;
 
 window.assistant.onPositionUpdate((data) => {
+  const spriteContainer = charEl.querySelector('.sprite-container');
+
   if (data.walking && !isWalking) {
-    charEl.querySelector('.sprite-container').classList.add('walking');
+    spriteContainer.classList.add('walking');
     isWalking = true;
   } else if (!data.walking && isWalking) {
-    charEl.querySelector('.sprite-container').classList.remove('walking');
+    spriteContainer.classList.remove('walking');
     isWalking = false;
   }
 
-  // Direction
-  if (data.direction === 'left') {
-    charEl.className = 'facing-left';
-  } else {
-    charEl.className = 'facing-right';
-  }
-
-  if (isWalking) {
-    charEl.querySelector('.sprite-container').classList.add('walking');
-  }
+  // Direction — use classList instead of overwriting className
+  charEl.classList.remove('facing-left', 'facing-right');
+  charEl.classList.add(data.direction === 'left' ? 'facing-left' : 'facing-right');
 });
 
 // Click handler

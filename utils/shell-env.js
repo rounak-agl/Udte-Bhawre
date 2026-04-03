@@ -14,7 +14,9 @@ const isWindows = process.platform === 'win32';
 function findBinary(name, fallbackPaths = []) {
   // Try 'where' on Windows, 'which' on Unix
   try {
-    const cmd = isWindows ? `C:\\Windows\\System32\\where.exe ${name}` : `which ${name}`;
+    const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+    const whereCmd = path.join(systemRoot, 'System32', 'where.exe');
+    const cmd = isWindows ? `"${whereCmd}" ${name}` : `command -v ${name}`;
     const result = execSync(cmd, {
       encoding: 'utf8',
       timeout: 5000,
@@ -32,13 +34,17 @@ function findBinary(name, fallbackPaths = []) {
 
   // Check fallback paths
   const home = os.homedir();
+  const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+  const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+
   const defaultFallbacks = isWindows ? [
     path.join(home, '.local', 'bin', `${name}.exe`),
     path.join(home, '.local', 'bin', `${name}.cmd`),
-    path.join(home, 'AppData', 'Roaming', 'npm', `${name}.cmd`),
-    path.join(home, 'AppData', 'Roaming', 'npm', `${name}`),
+    path.join(appData, 'npm', `${name}.cmd`),
+    path.join(appData, 'npm', `${name}`),
     path.join(home, '.claude', 'local', 'bin', `${name}.exe`),
-    `C:\\Program Files\\nodejs\\${name}.cmd`,
+    path.join(programFiles, 'nodejs', `${name}.cmd`),
   ] : [
     path.join(home, '.local', 'bin', name),
     path.join(home, '.claude', 'local', 'bin', name),
@@ -66,14 +72,20 @@ function getProcessEnv() {
   const home = os.homedir();
 
   if (isWindows) {
+    const systemRoot = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+    const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+
     const extraPaths = [
-      path.join(home, 'AppData', 'Roaming', 'npm'),
+      path.join(appData, 'npm'),
       path.join(home, '.local', 'bin'),
       path.join(home, '.claude', 'local', 'bin'),
-      'C:\\Program Files\\nodejs',
-      'C:\\Windows\\System32',
+      path.join(programFiles, 'nodejs'),
+      path.join(systemRoot, 'System32'),
     ];
-    env.PATH = extraPaths.join(';') + ';' + (env.PATH || '');
+    // On Windows, PATH can be Path or PATH
+    const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') || 'PATH';
+    env[pathKey] = extraPaths.join(path.delimiter) + path.delimiter + (env[pathKey] || '');
   } else {
     const extraPaths = [
       path.join(home, '.local', 'bin'),
@@ -82,7 +94,7 @@ function getProcessEnv() {
       '/opt/homebrew/bin',
       path.join(home, '.npm-global', 'bin'),
     ];
-    env.PATH = extraPaths.join(':') + ':' + (env.PATH || '');
+    env.PATH = extraPaths.join(path.delimiter) + path.delimiter + (env.PATH || '');
   }
 
   return env;

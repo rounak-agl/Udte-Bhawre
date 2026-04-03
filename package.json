@@ -4,7 +4,7 @@
   "description": "Tiny AI companions that live on your taskbar — cross-platform port of lil-agents",
   "main": "main.js",
   "scripts": {
-    "start": "electron . --no-sandbox --enable-features=WebRTCPipeWireCapturer",
+    "start": "electron . --no-sandbox --disable-dev-shm-usage",
     "build:win": "electron-builder --win",
     "build:linux": "electron-builder --linux"
   },

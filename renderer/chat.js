@@ -37,39 +37,57 @@ const providerNames = {
 
 // ─── Markdown → HTML renderer ───
 function renderMarkdown(text) {
-  let html = escapeHtml(text);
-
-  // Code blocks (``` ... ```), must be before inline code
-  html = html.replace(/```bbox\s*\n?[\s\S]*?```/g, ''); // Strip bbox blocks from display
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    return `<pre class="md-code-block"><code>${code.trim()}</code></pre>`;
+  // 1. Extract code blocks BEFORE escaping (so backticks survive)
+  const codeBlocks = [];
+  // Strip bbox blocks entirely
+  text = text.replace(/```bbox\s*\n?[\s\S]*?```/g, '');
+  // Extract fenced code blocks
+  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const placeholder = `%%CODEBLOCK_${codeBlocks.length}%%`;
+    codeBlocks.push(`<pre class="md-code-block"><code>${escapeHtml(code.trim())}</code></pre>`);
+    return placeholder;
+  });
+  // Extract inline code
+  const inlineCodes = [];
+  text = text.replace(/`([^`]+)`/g, (_, code) => {
+    const placeholder = `%%INLINECODE_${inlineCodes.length}%%`;
+    inlineCodes.push(`<code class="md-inline-code">${escapeHtml(code)}</code>`);
+    return placeholder;
   });
 
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
+  // 2. Now escape the remaining HTML
+  let html = escapeHtml(text);
 
-  // Bold
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // 3. Bold (non-greedy)
+  html = html.replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>');
 
-  // Italic
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  // 4. Italic (non-greedy)
+  html = html.replace(/\*([\s\S]*?)\*/g, '<em>$1</em>');
 
-  // Headings (### h3, ## h2, # h1)
+  // 5. Headings (### h3, ## h2, # h1)
   html = html.replace(/^### (.+)$/gm, '<h4 class="md-heading">$1</h4>');
   html = html.replace(/^## (.+)$/gm, '<h3 class="md-heading">$1</h3>');
   html = html.replace(/^# (.+)$/gm, '<h3 class="md-heading">$1</h3>');
 
-  // Unordered list items
+  // 6. Unordered list items
   html = html.replace(/^[\-\*] (.+)$/gm, '<li class="md-list-item">$1</li>');
 
-  // Ordered list items
+  // 7. Ordered list items
   html = html.replace(/^\d+\. (.+)$/gm, '<li class="md-list-item md-ordered">$1</li>');
 
-  // Links
+  // 8. Links
   html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link" target="_blank">$1</a>');
 
-  // Line breaks
+  // 9. Line breaks
   html = html.replace(/\n/g, '<br>');
+
+  // 10. Restore code blocks and inline code
+  codeBlocks.forEach((block, i) => {
+    html = html.replace(`%%CODEBLOCK_${i}%%`, block);
+  });
+  inlineCodes.forEach((code, i) => {
+    html = html.replace(`%%INLINECODE_${i}%%`, code);
+  });
 
   return html;
 }
@@ -327,6 +345,13 @@ window.assistant.onThemeChange((theme) => {
 window.assistant.onProviderChange((provider) => {
   currentProvider = provider;
   updateTitle();
+  messagesEl.innerHTML = '';
+  addMessage('system', '🔄 Provider changed. Session restarted.');
+});
+
+window.assistant.onApiKeyChange(() => {
+  messagesEl.innerHTML = '';
+  addMessage('system', '🔑 API Key updated. Session restarted.');
 });
 
 // Focus input on load

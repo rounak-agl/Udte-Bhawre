@@ -53,7 +53,24 @@ class ClaudeSession extends EventEmitter {
       });
 
       this.process.stderr.on('data', (data) => {
-        this.emit('error', data.toString('utf8'));
+        const errText = data.toString('utf8').trim();
+        if (!errText) return;
+
+        // Filter common non-error stderr noise from Claude CLI
+        if (errText.includes('Thinking') || errText.includes('Loading')) return;
+        if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\s]+$/.test(errText)) return; // spinner
+
+        // Friendly rate-limit message
+        if (errText.includes('429') || errText.includes('rate') || errText.includes('overloaded')) {
+          this.emit('error', '⏳ Claude is busy. Please wait a moment and try again.');
+          return;
+        }
+
+        // Only emit actual error messages
+        const firstLine = errText.split('\n')[0].substring(0, 200);
+        if (firstLine.includes('Error') || firstLine.includes('error') || firstLine.includes('not found') || firstLine.includes('fail')) {
+          this.emit('error', firstLine);
+        }
       });
 
       this.process.on('exit', () => {
