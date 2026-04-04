@@ -545,7 +545,7 @@ function loadArmorIQConfig() {
     const parsed = JSON.parse(raw);
     const pluginConfig = parsed.plugins?.entries?.armorclaw?.config || {};
     return {
-      apiKey: process.env.ARMORIQ_API_KEY || pluginConfig.apiKey || '',
+      apiKey:process.env.ARMORIQ_API_KEY || pluginConfig.apiKey || '',
       userId: pluginConfig.userId || 'default-user',
       agentId: pluginConfig.agentId || 'openclaw-agent-001',
       contextId: pluginConfig.contextId || 'default',

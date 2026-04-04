@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Desktop Dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="sidebar">
+    <div class="logo">
+      <div class="logo-icon"></div>
+      <h2>Nexus</h2>
+    </div>
+    <nav>
+      <button class="nav-btn active" data-tab="agents">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+        Agents
+      </button>
+      <button class="nav-btn" data-tab="history">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+        History
+      </button>
+      <button class="nav-btn" data-tab="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        Settings
+      </button>
+    </nav>
+  </div>
+
+  <div class="main-content">
+    
+    <!-- Agents View -->
+    <div id="view-agents" class="view active">
+      <div class="header">
+        <h1>Your Agents</h1>
+        <button id="btn-create-agent" class="btn primary">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          New Agent
+        </button>
+      </div>
+      <div class="agents-grid" id="agents-container">
+        <!-- Agent cards injected via JS -->
+      </div>
+    </div>
+
+    <!-- History View -->
+    <div id="view-history" class="view">
+      <div class="header">
+        <h1>Conversation History</h1>
+      </div>
+      <div class="history-layout">
+        <div class="history-sidebar" id="history-sessions-list">
+          <!-- Session list injected via JS -->
+        </div>
+        <div class="history-chat" id="history-chat-view">
+          <div class="empty-state">Select a conversation to view details</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Agent Modal -->
+  <div class="modal" id="agent-modal">
+    <div class="modal-content glass">
+      <h2 id="modal-title">Create Agent</h2>
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="agent-name" placeholder="e.g. Code Buddy">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Theme</label>
+          <select id="agent-theme">
+            <option value="Midnight">Midnight</option>
+            <option value="Peach">Peach</option>
+            <option value="Cloud">Cloud</option>
+            <option value="Moss">Moss</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Provider</label>
+          <select id="agent-provider">
+            <option value="gemini">Gemini</option>
+            <option value="vision">Gemini Vision</option>
+            <option value="claude">Claude</option>
+            <option value="codex">Codex</option>
+            <option value="copilot">Copilot</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Context Markdown File (.md)</label>
+        <div class="file-input-wrapper">
+          <input type="text" id="agent-context" placeholder="Select a markdown file for system context" readonly>
+          <button class="btn secondary" id="btn-browse-context">Browse</button>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn ghost" id="btn-cancel-modal">Cancel</button>
+        <button class="btn primary" id="btn-save-agent">Save Agent</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

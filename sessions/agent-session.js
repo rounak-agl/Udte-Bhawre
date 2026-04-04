@@ -48,6 +48,7 @@ class SettingsStore {
     this._provider = 'vision';
     this._theme = 'Peach';
     this._apiKey = '';
+    this._elevenLabsApiKey = '';
     this._toolsEnabled = true;
     this._mcpServers = {};
     this._load();
@@ -59,6 +60,8 @@ class SettingsStore {
       this._provider = store.provider || 'vision';
       this._theme = store.theme || 'Peach';
       this._apiKey = store.apiKey || '';
+      this._elevenLabsApiKey = store.elevenLabsApiKey || '';
+      this._mongodbUri = store.mongodbUri || '';
       this._toolsEnabled = store.toolsEnabled !== false; // default true
       this._mcpServers = store.mcpServers || {};
     } catch (e) {
@@ -71,6 +74,8 @@ class SettingsStore {
       provider: this._provider,
       theme: this._theme,
       apiKey: this._apiKey,
+      elevenLabsApiKey: this._elevenLabsApiKey,
+      mongodbUri: this._mongodbUri,
       toolsEnabled: this._toolsEnabled,
       mcpServers: this._mcpServers
     });
@@ -84,6 +89,12 @@ class SettingsStore {
 
   get apiKey() { return this._apiKey; }
   set apiKey(v) { this._apiKey = v; this._save(); }
+
+  get elevenLabsApiKey() { return this._elevenLabsApiKey; }
+  set elevenLabsApiKey(v) { this._elevenLabsApiKey = v; this._save(); }
+
+  get mongodbUri() { return this._mongodbUri; }
+  set mongodbUri(v) { this._mongodbUri = v; this._save(); }
 
   get toolsEnabled() { return this._toolsEnabled; }
   set toolsEnabled(v) { this._toolsEnabled = v; this._save(); }
@@ -131,6 +142,22 @@ function setApiKey(key) {
   settings.apiKey = key;
 }
 
+function getElevenLabsApiKey() {
+  return settings.elevenLabsApiKey;
+}
+
+function setElevenLabsApiKey(key) {
+  settings.elevenLabsApiKey = key;
+}
+
+function getMongodbUri() {
+  return settings.mongodbUri;
+}
+
+function setMongodbUri(uri) {
+  settings.mongodbUri = uri;
+}
+
 function getToolsEnabled() {
   return settings.toolsEnabled;
 }
@@ -168,6 +195,10 @@ module.exports = {
   setCurrentTheme,
   getApiKey,
   setApiKey,
+  getElevenLabsApiKey,
+  setElevenLabsApiKey,
+  getMongodbUri,
+  setMongodbUri,
   getToolsEnabled,
   setToolsEnabled,
   getMcpServers,

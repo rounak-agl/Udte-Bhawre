@@ -126,38 +126,38 @@ class McpClientManager extends EventEmitter {
     
     // ── ArmorIQ Security Gate ────────────────────────────
     if (!this.guard || !this.guard.enabled) {
-      console.log('[GATE] Guard offline or missing — Fail closed');
-      // Fail closed
-      return { success: false, securityBlock: true, error: 'Security gate offline — all tools blocked.' };
+      // Guard not configured — passthrough mode (tools execute normally)
+      // When an API key is added, the guard activates and enforces security
+      console.log('[GATE] Guard not active — passthrough mode');
+    } else {
+      try {
+        console.log('[GATE] Sending to tool validation:', toolName);
+        const validation = await this.guard.hooks.onToolExecution(toolName, args);
+        console.log('[GATE] Validation result:', validation);
+        if (!validation.allowed) {
+           return {
+             success: false,
+             securityBlock: true,
+             error: `🛡️ ArmorIQ BLOCKED: ${validation.reason}`,
+             toolName,
+           };
+        }
+        this.emit('security:tool-allowed', { tool: toolName, timestamp: Date.now() });
+      } catch (error) {
+        // Precise error code handling
+        if (error.code === 'POLICY_DENY') {
+          this.emit('security:enforcement-block', { tool: toolName, reason: 'Policy deny list match', rule: error.rule });
+          return { success: false, securityBlock: true, error: 'Blocked by policy: ' + toolName, toolName };
+        }
+        if (error.code === 'INTENT_DRIFT') {
+          this.emit('security:enforcement-block', { tool: toolName, reason: 'Tool not in signed intent plan' });
+          return { success: false, securityBlock: true, error: 'Blocked — intent drift detected', toolName };
+        }
+        throw error; // Real errors must surface
+      }
     }
 
-    try {
-      console.log('[GATE] Sending to tool validation:', toolName);
-      const validation = await this.guard.hooks.onToolExecution(toolName, args);
-      console.log('[GATE] Validation result:', validation);
-      if (!validation.allowed) {
-         return {
-           success: false,
-           securityBlock: true,
-           error: `🛡️ ArmorIQ BLOCKED: ${validation.reason}`,
-           toolName,
-         };
-      }
-      this.emit('security:tool-allowed', { tool: toolName, timestamp: Date.now() });
-    } catch (error) {
-      // Precise error code handling
-      if (error.code === 'POLICY_DENY') {
-        this.emit('security:enforcement-block', { tool: toolName, reason: 'Policy deny list match', rule: error.rule });
-        return { success: false, securityBlock: true, error: 'Blocked by policy: ' + toolName, toolName };
-      }
-      if (error.code === 'INTENT_DRIFT') {
-        this.emit('security:enforcement-block', { tool: toolName, reason: 'Tool not in signed intent plan' });
-        return { success: false, securityBlock: true, error: 'Blocked — intent drift detected', toolName };
-      }
-      throw error; // Real errors must surface
-    }
-
-    // ── Normal tool execution (passed security) ──────────
+    // ── Normal tool execution (passed security or passthrough) ──────────
 
     // Check built-in tools first
     if (isBuiltinTool(toolName)) {

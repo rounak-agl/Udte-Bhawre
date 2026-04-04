@@ -322,7 +322,7 @@ h4.md-heading {
   box-shadow: 0 0 0 2px var(--accent-color);
 }
 
-#btn-send {
+#btn-send, #btn-mic {
   background: var(--accent-color);
   border: none;
   color: white;
@@ -337,9 +337,20 @@ h4.md-heading {
   flex-shrink: 0;
 }
 
-#btn-send:hover {
+#btn-send:hover, #btn-mic:hover {
   transform: scale(1.1);
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+#btn-mic.recording {
+  background: var(--error-color);
+  animation: pulseRecording 1.5s infinite;
+}
+
+@keyframes pulseRecording {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(230, 77, 51, 0.7); }
+  70% { transform: scale(1.1); box-shadow: 0 0 0 10px rgba(230, 77, 51, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(230, 77, 51, 0); }
 }
 
 /* ═══════════════════════════════════════════════ */

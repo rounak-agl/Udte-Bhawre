@@ -14,7 +14,8 @@ runBootstrap();
 
 const { getTaskbarGeometry, getCharacterY } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
-const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getToolsEnabled, setToolsEnabled, getMcpServers, setMcpServers } = require('./sessions/agent-session');
+const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getElevenLabsApiKey, setElevenLabsApiKey, getMongodbUri, setMongodbUri, getToolsEnabled, setToolsEnabled, getMcpServers, setMcpServers } = require('./sessions/agent-session');
+const { connectDB, isDBConnected, Agent, ChatSession } = require('./utils/db');
 const ClaudeSession = require('./sessions/claude-session');
 const CodexSession = require('./sessions/codex-session');
 const CopilotSession = require('./sessions/copilot-session');
@@ -29,6 +30,7 @@ let tray = null;
 let characters = [];
 let onboardingDone = false;
 let overlayWindow = null;
+let dashboardWindow = null;
 const screenCapture = new ScreenCapture({ maxBuffer: 3 });
 
 let pendingEvents = [];
@@ -128,6 +130,12 @@ class Character {
     this.flyDuration = 500;
     this.savedTaskbarPos = null;
 
+    // Database linkage
+    this.agentId = null;
+    this.sessionId = null;
+    this.systemPromptFile = null;
+
+
     // Internal flags
     this._destroying = false;
   }
@@ -211,8 +219,8 @@ class Character {
     this.chatWindow.loadFile(path.join(__dirname, 'renderer', 'chat.html'));
 
     this.chatWindow.webContents.on('did-finish-load', () => {
-      this.chatWindow.webContents.send('theme-change', getCurrentTheme());
-      this.chatWindow.webContents.send('provider-change', getCurrentProvider());
+      this.chatWindow.webContents.send('theme-change', this.theme || getCurrentTheme());
+      this.chatWindow.webContents.send('provider-change', this.provider || getCurrentProvider());
 
       // Replay history if session exists
       if (this.session && this.session.history.length > 0) {
@@ -231,7 +239,7 @@ class Character {
   }
 
   createSession() {
-    const providerKey = getCurrentProvider();
+    const providerKey = this.provider || getCurrentProvider();
     if (this.session) {
       this.session.terminate();
       this.session.removeAllListeners();
@@ -290,7 +298,13 @@ class Character {
       }
       this.stopThinking();
       this.showCompletionBubble();
+
+      // Save history to MongoDB if agentId is present
+      if (this.agentId && this.session.history.length > 0) {
+        this.saveSessionHistory();
+      }
     });
+
 
     // Vision-specific: step guide event
     this.session.on('stepGuide', (steps) => {
@@ -321,6 +335,23 @@ class Character {
       this.session.start(apiKey);
     } else {
       this.session.start();
+    }
+
+   // Push system prompt if one is loaded
+    if (this.systemPromptFile) {
+      try {
+        const fs = require('fs');
+        const contextData = fs.readFileSync(this.systemPromptFile, 'utf-8');
+        if (contextData) {
+          // Send a hidden system injected prompt or just feed it as part of history.
+          // Since there is no explicit setSystemPrompt on generic sessions yet,
+          // we can simulate setting context inside the session history conceptually
+          // Though typically you'd need the provider to support it natively.
+          console.log('[System Prompt Loaded from]', this.systemPromptFile);
+        }
+      } catch (err) {
+        console.error('Failed to load system prompt:', err);
+      }
     }
   }
 
@@ -360,7 +391,8 @@ class Character {
     this.bubbleWindow.setBounds({ x: Math.round(bubbleX), y: Math.round(bubbleY), width: 160, height: 50 });
     this.bubbleWindow.show();
 
-    const theme = BUBBLE_THEMES[getCurrentTheme()] || BUBBLE_THEMES['Midnight'];
+    const themeName = this.theme || getCurrentTheme();
+    const theme = BUBBLE_THEMES[themeName] || BUBBLE_THEMES['Midnight'];
     this.bubbleWindow.webContents.send('bubble-show', { text, isCompletion, theme });
   }
 
@@ -560,49 +592,74 @@ class Character {
       this.bubbleWindow.destroy();
     }
   }
+
+  async saveSessionHistory() {
+    try {
+      if (!this.agentId) return;
+      if (!isDBConnected()) {
+        console.log('[DB] Not connected — skipping history save.');
+        return;
+      }
+      const { ChatSession } = require('./utils/db');
+      
+      // Build messages array with safe text fallback
+      const messages = this.session.history.map(msg => ({
+        role: msg.role || 'system',
+        text: msg.text || `[${msg.role}]`,
+        isTool: msg.isTool || msg.role === 'toolUse' || msg.role === 'toolResult' || false,
+        timestamp: msg.timestamp || new Date()
+      }));
+
+      if (!this.sessionId) {
+        // Create new session
+        const newSession = new ChatSession({
+          agentId: this.agentId,
+          title: this.session.history.filter(m => m.role === 'user').pop()?.text?.substring(0, 30) || 'New Conversation',
+          messages
+        });
+        const saved = await newSession.save();
+        this.sessionId = saved._id;
+      } else {
+        // Update existing
+        await ChatSession.findByIdAndUpdate(this.sessionId, {
+          messages,
+          updatedAt: new Date()
+        });
+      }
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        dashboardWindow.webContents.send('history-updated');
+      }
+    } catch(e) {
+      console.error('[DB] Failed to save history:', e.message);
+    }
+  }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  App Lifecycle
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-app.whenReady().then(() => {
-  // Create characters
-  const char1 = new Character({
-    name: 'Buddy',
-    color: '#66b88d',
-    colorDark: '#4a9b72',
-    startPosition: 0.3,
-    yOffset: -3,
-    initialPause: 500 + Math.random() * 1500,
-    isOnboarding: true
-  });
-
-  const char2 = new Character({
-    name: 'Spark',
-    color: '#ff6600',
-    colorDark: '#cc5200',
-    startPosition: 0.7,
-    yOffset: -3,
-    initialPause: 8000 + Math.random() * 6000,
-    isOnboarding: false
-  });
-
-  char1.createCharacterWindow();
-  char2.createCharacterWindow();
-  characters = [char1, char2];
-
+app.whenReady().then(async () => {
   // Start screen capture service
   screenCapture.start();
+
+  // Connect to DB (blocking for initial load)
+  const mongoUri = getMongodbUri() || process.env.MONGODB_URI;
+  try {
+    const connected = await connectDB(mongoUri);
+    if (connected) {
+      console.log('[DB] Loading stored agents...');
+      await loadAllAgentsFromDB();
+    }
+  } catch (e) {
+    console.error('[DB] Connection/Load failed:', e);
+  }
+
+  // Create Dashboard Window
+  createDashboardWindow();
 
   setupTray();
   startUpdateLoop();
   createOverlayWindow();
-
-  // Onboarding — show welcome bubble after a delay
-  setTimeout(() => {
-    char1.showBubble('hi! 👋', true);
-    setTimeout(() => char1.hideBubble(), 5000);
-  }, 2000);
 });
 
 app.on('window-all-closed', () => {
@@ -636,28 +693,15 @@ function rebuildTrayMenu() {
   const themes = ['Peach', 'Midnight', 'Cloud', 'Moss'];
 
   const template = [
-    {
-      label: characters[0]?.name || 'Buddy',
+    ...characters.map((char, index) => ({
+      label: char.name || `Agent ${index + 1}`,
       type: 'checkbox',
-      checked: characters[0]?.manuallyVisible ?? true,
+      checked: char.manuallyVisible ?? true,
       click: () => {
-        if (characters[0]) {
-          characters[0].setManuallyVisible(!characters[0].manuallyVisible);
-          rebuildTrayMenu();
-        }
+        char.setManuallyVisible(!char.manuallyVisible);
+        rebuildTrayMenu();
       }
-    },
-    {
-      label: characters[1]?.name || 'Spark',
-      type: 'checkbox',
-      checked: characters[1]?.manuallyVisible ?? true,
-      click: () => {
-        if (characters[1]) {
-          characters[1].setManuallyVisible(!characters[1].manuallyVisible);
-          rebuildTrayMenu();
-        }
-      }
-    },
+    })),
     { type: 'separator' },
     {
       label: 'Sounds',
@@ -732,10 +776,11 @@ function rebuildTrayMenu() {
       label: 'Manage MCP Servers...',
       click: () => {
         const settingsWin = new BrowserWindow({
-          width: 500,
-          height: 600,
-          title: 'MCP Server Configuration',
+          width: 560,
+          height: 700,
+          title: 'MCP Integrations',
           autoHideMenuBar: true,
+          backgroundColor: '#0d0d12',
           webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
@@ -743,6 +788,31 @@ function rebuildTrayMenu() {
           }
         });
         settingsWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
+      }
+    },
+    {
+      label: 'Set ElevenLabs API Key...',
+      click: () => {
+        promptForElevenLabsApiKey();
+      }
+    },
+    {
+      label: 'Set MongoDB URI...',
+      click: () => {
+        promptForApiKeyInput('MongoDB URI', 'mongodb.com', 'MONGO_URI:', async key => {
+          setMongodbUri(key);
+          const connected = await connectDB(key);
+          if (connected) {
+            await loadAllAgentsFromDB();
+          }
+        });
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Open Dashboard',
+      click: () => {
+        createDashboardWindow();
       }
     },
     {
@@ -829,6 +899,58 @@ function promptForApiKey() {
       });
 
       // Close the input dialog from the main process (safe — title event already fired)
+      if (!inputWin.isDestroyed()) {
+        inputWin.destroy();
+      }
+    }
+  });
+}
+
+function promptForElevenLabsApiKey() {
+  const inputWin = new BrowserWindow({
+    width: 450,
+    height: 180,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    title: 'Set ElevenLabs API Key',
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  });
+
+  const currentKey = getElevenLabsApiKey();
+  const maskedKey = currentKey ? currentKey.substring(0, 8) + '...' : '';
+
+  const htmlContent = `
+    <html><body style="font-family:Segoe UI,sans-serif;padding:20px;background:#1a1a2e;color:#fff">
+    <h3 style="margin:0 0 10px">ElevenLabs API Key</h3>
+    <p style="font-size:12px;color:#aaa;margin:0 0 10px">Get one at <a href="https://elevenlabs.io" style="color:#00d4aa">elevenlabs.io</a></p>
+    <input id="key" type="text" placeholder="\${maskedKey || 'Paste your ElevenLabs API key here'}" 
+      style="width:100%;padding:8px 12px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;font-size:14px;outline:none" autofocus>
+    <div style="margin-top:12px;text-align:right">
+      <button onclick="window.close()" style="padding:6px 16px;border:1px solid #444;border-radius:6px;background:transparent;color:#aaa;cursor:pointer;margin-right:8px">Cancel</button>
+      <button onclick="save()" style="padding:6px 16px;border:none;border-radius:6px;background:#00d4aa;color:#000;font-weight:600;cursor:pointer">Save</button>
+    </div>
+    <script>
+      function save() {
+        const key = document.getElementById('key').value.trim();
+        if (key) {
+          document.title = 'ELEVENLABS_APIKEY:' + key;
+        } else {
+          window.close();
+        }
+      }
+      document.getElementById('key').addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+    </script>
+    </body></html>
+  `;
+  inputWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
+
+  inputWin.on('page-title-updated', (e, title) => {
+    if (title.startsWith('ELEVENLABS_APIKEY:')) {
+      const key = title.substring(18);
+      setElevenLabsApiKey(key);
+      console.log('[ElevenLabs API Key] Updated.');
       if (!inputWin.isDestroyed()) {
         inputWin.destroy();
       }
@@ -970,6 +1092,14 @@ ipcMain.handle('get-api-key', () => {
   return getApiKey();
 });
 
+ipcMain.on('set-eleven-labs-api-key', (event, key) => {
+  setElevenLabsApiKey(key);
+});
+
+ipcMain.handle('get-eleven-labs-api-key', () => {
+  return getElevenLabsApiKey();
+});
+
 ipcMain.on('fly-to-element', (event, element) => {
   // Fly the first character to the element position
   const char = characters[0];
@@ -1081,4 +1211,184 @@ function showOverlay() {
 function hideOverlay() {
   if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
   if (stepPanelWindow && !stepPanelWindow.isDestroyed()) stepPanelWindow.hide();
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+//  Dashboard
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function createDashboardWindow() {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.show();
+    return;
+  }
+  
+  dashboardWindow = new BrowserWindow({
+    width: 1024,
+    height: 768,
+    title: 'Nexus Dashboard',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  
+  dashboardWindow.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'));
+  
+  dashboardWindow.on('closed', () => {
+    dashboardWindow = null;
+  });
+}
+
+// ── Dashboard / MongoDB IPC ──
+ipcMain.handle('get-agents', async () => {
+  if (!isDBConnected()) return [];
+  try {
+    const agents = await Agent.find().sort({ createdAt: -1 });
+    return agents.map(a => Object.assign(a.toObject(), { _id: a._id.toString() }));
+  } catch (err) {
+    console.error('[DB] get-agents error:', err.message);
+    return [];
+  }
+});
+
+ipcMain.handle('save-agent', async (event, config) => {
+  if (!isDBConnected()) return false;
+  try {
+    const newAgent = new Agent(config);
+    await newAgent.save();
+    return true;
+  } catch (err) {
+    console.error('[DB] save-agent error:', err.message);
+    return false;
+  }
+});
+
+async function loadAllAgentsFromDB() {
+  if (!isDBConnected()) return;
+  try {
+    const agents = await Agent.find().sort({ createdAt: 1 });
+    console.log(`[DB] Found ${agents.length} agents in database.`);
+    for (const agent of agents) {
+      launchAgentInstance(agent);
+    }
+  } catch (err) {
+    console.error('[DB] loadAllAgentsFromDB error:', err.message);
+  }
+}
+
+function launchAgentInstance(agentObj) {
+  // Check if already launched
+  const exists = characters.find(c => c.agentId === agentObj._id.toString());
+  if (exists) return;
+
+  const char = new Character({
+    name: agentObj.name,
+    color: agentObj.theme === 'Moss' ? '#8c9480' : 
+           agentObj.theme === 'Peach' ? '#f28ca6' : 
+           agentObj.theme === 'Cloud' ? '#0078d6' : '#ff6600',
+    colorDark: agentObj.theme === 'Moss' ? '#666b5d' : 
+               agentObj.theme === 'Peach' ? '#c86f87' : 
+               agentObj.theme === 'Cloud' ? '#005bb5' : '#cc5200',
+    startPosition: Math.random() * 0.8 + 0.1,
+    yOffset: -3,
+    initialPause: 500 + Math.random() * 2000,
+    isOnboarding: false
+  });
+  
+  char.agentId = agentObj._id.toString();
+  char.systemPromptFile = agentObj.contextFile;
+
+  char.createCharacterWindow();
+  characters.push(char);
+  
+  // Set provider for this session
+  // Since multiple agents can have different providers, we don't use global state here
+  // The Character instance needs its own provider handle
+  char.provider = agentObj.provider;
+  char.theme = agentObj.theme;
+  
+  rebuildTrayMenu();
+}
+
+ipcMain.on('launch-agent', async (event, agentObj) => {
+  launchAgentInstance(agentObj);
+});
+
+ipcMain.handle('get-history', async () => {
+  if (!isDBConnected()) return [];
+  try {
+    const sessions = await ChatSession.find().populate('agentId').sort({ updatedAt: -1 }).limit(50);
+    return sessions.map(s => {
+      const obj = s.toObject();
+      obj._id = obj._id.toString();
+      if (obj.agentId && obj.agentId._id) {
+        obj.agentId._id = obj.agentId._id.toString();
+      }
+      return obj;
+    });
+  } catch (err) {
+    console.error('[DB] get-history error:', err.message);
+    return [];
+  }
+});
+
+ipcMain.handle('choose-context-file', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile'],
+    filters: [{ name: 'Markdown', extensions: ['md'] }]
+  });
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
+
+function promptForApiKeyInput(titleText, linkText, prefix, onSave) {
+  const inputWin = new BrowserWindow({
+    width: 450,
+    height: 180,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    title: `Set ${titleText}`,
+    webPreferences: { nodeIntegration: false, contextIsolation: true }
+  });
+
+  const htmlContent = `
+    <html><body style="font-family:Segoe UI,sans-serif;padding:20px;background:#1a1a2e;color:#fff">
+    <h3 style="margin:0 0 10px">${titleText}</h3>
+    <p style="font-size:12px;color:#aaa;margin:0 0 10px">Get one at <a href="https://${linkText}" style="color:#00d4aa">${linkText}</a></p>
+    <input id="key" type="text" placeholder="Paste your ${titleText} here" 
+      style="width:100%;padding:8px 12px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;font-size:14px;outline:none" autofocus>
+    <div style="margin-top:12px;text-align:right">
+      <button onclick="window.close()" style="padding:6px 16px;border:1px solid #444;border-radius:6px;background:transparent;color:#aaa;cursor:pointer;margin-right:8px">Cancel</button>
+      <button onclick="save()" style="padding:6px 16px;border:none;border-radius:6px;background:#00d4aa;color:#000;font-weight:600;cursor:pointer">Save</button>
+    </div>
+    <script>
+      function save() {
+        const key = document.getElementById('key').value.trim();
+        if (key) {
+          document.title = '${prefix}' + key;
+        } else {
+          window.close();
+        }
+      }
+      document.getElementById('key').addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
+    </script>
+    </body></html>
+  `;
+  inputWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
+
+  inputWin.on('page-title-updated', (e, title) => {
+    if (title.startsWith(prefix)) {
+      const key = title.substring(prefix.length);
+      onSave(key);
+      console.log(`[${titleText}] Updated.`);
+      if (!inputWin.isDestroyed()) {
+        inputWin.destroy();
+      }
+    }
+  });
 }

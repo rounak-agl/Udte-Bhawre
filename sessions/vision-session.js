@@ -72,6 +72,12 @@ class VisionSession extends EventEmitter {
       const mcpConfigs = getMcpServers() || {};
       await this.mcpClient.initialize(mcpConfigs);
 
+      // Forward security events from MCP client to session level
+      this.mcpClient.on('security:intent-sealed', (data) => this.emit('security:intent-sealed', data));
+      this.mcpClient.on('security:intent-failed', (data) => this.emit('security:intent-failed', data));
+      this.mcpClient.on('security:tool-allowed', (data) => this.emit('security:tool-allowed', data));
+      this.mcpClient.on('security:enforcement-block', (data) => this.emit('security:enforcement-block', data));
+
       this.isRunning = true;
       this.emit('sessionReady');
       console.log('[VisionSession] Initialized with gemini-2.0-flash + MCP tools');

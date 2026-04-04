@@ -3,113 +3,88 @@
 <head>
   <meta charset="UTF-8">
   <title>Manage MCP Servers</title>
-  <style>
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background-color: #1a1a1a;
-      color: #e0e0e0;
-      margin: 0;
-      padding: 20px;
-      user-select: none;
-    }
-    h2 { margin-top: 0; color: #ff6600; font-weight: 600; }
-    p { font-size: 13px; color: #aaa; margin-bottom: 20px; }
-    
-    /* Server List */
-    #server-list {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      margin-bottom: 30px;
-    }
-    .server-card {
-      background: #2a2a2a;
-      border: 1px solid #444;
-      border-radius: 8px;
-      padding: 12px 16px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .server-info h4 { margin: 0 0 4px 0; color: #fff; font-size: 14px; }
-    .server-info code { font-size: 11px; color: #ff6600; background: #111; padding: 2px 6px; border-radius: 4px; }
-    .delete-btn {
-      background: transparent;
-      border: 1px solid #ff4444;
-      color: #ff4444;
-      padding: 6px 12px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: bold;
-      transition: all 0.2s;
-    }
-    .delete-btn:hover { background: #ff4444; color: #fff; }
-
-    /* Add Server Form */
-    .add-form {
-      background: #222;
-      padding: 16px;
-      border-radius: 8px;
-      border: 1px dashed #555;
-    }
-    .add-form h3 { margin: 0 0 12px 0; font-size: 15px; }
-    .input-group { margin-bottom: 12px; }
-    .input-group label { display: block; font-size: 12px; margin-bottom: 4px; color: #aaa; }
-    input {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 8px;
-      background: #111;
-      border: 1px solid #444;
-      color: #fff;
-      border-radius: 4px;
-      font-family: monospace;
-    }
-    input:focus { outline: none; border-color: #ff6600; }
-    .save-btn {
-      width: 100%;
-      background: #ff6600;
-      color: #000;
-      border: none;
-      padding: 10px;
-      border-radius: 6px;
-      font-weight: bold;
-      cursor: pointer;
-      margin-top: 8px;
-    }
-    .save-btn:hover { background: #ff8533; }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="settings.css">
 </head>
 <body>
 
-  <h2>MCP Servers</h2>
-  <p>Connect official tools (Filesystem, GitHub, Postgres) to your assistant.</p>
-
-  <div id="server-list">
+  <!-- Header -->
+  <header class="page-header">
+    <div class="header-left">
+      <div class="header-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="url(#hGrad)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <defs><linearGradient id="hGrad" x1="0" y1="0" x2="24" y2="24"><stop offset="0%" stop-color="#ff6600"/><stop offset="100%" stop-color="#ff3366"/></linearGradient></defs>
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </div>
+      <div>
+        <h1>MCP Integrations</h1>
+        <p class="header-subtitle">Connect your favorite tools to supercharge your assistant</p>
+      </div>
     </div>
+    <div class="connection-stats" id="connection-stats">
+      <span class="stat-dot"></span>
+      <span id="connected-count">0</span> connected
+    </div>
+  </header>
 
-  <div class="add-form">
-    <h3>+ Add New Server</h3>
-    <form id="add-server-form">
-      <div class="input-group">
-        <label>Server Identifier (e.g., github, filesystem)</label>
-        <input type="text" id="input-name" required placeholder="local-filesystem">
+  <!-- Default Integrations Section -->
+  <section class="section">
+    <h2 class="section-title">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      Default Integrations
+    </h2>
+    <p class="section-desc">Pre-configured MCP servers for popular tools. Add your API key to connect.</p>
+    <div id="default-integrations" class="integrations-grid"></div>
+  </section>
+
+  <!-- Custom Servers Section -->
+  <section class="section">
+    <h2 class="section-title">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="1"/><circle cx="6" cy="18" r="1"/></svg>
+      Custom Servers
+    </h2>
+    <p class="section-desc">Your manually configured MCP servers.</p>
+    <div id="custom-server-list"></div>
+
+    <!-- Add Custom Server -->
+    <div class="add-form" id="add-form-container">
+      <button class="add-toggle-btn" id="add-toggle-btn" onclick="toggleAddForm()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Custom Server
+      </button>
+      <div class="add-form-fields" id="add-form-fields" style="display:none;">
+        <form id="add-server-form">
+          <div class="form-row">
+            <div class="input-group">
+              <label>Server Name</label>
+              <input type="text" id="input-name" required placeholder="e.g. my-database">
+            </div>
+            <div class="input-group">
+              <label>Command</label>
+              <input type="text" id="input-command" required placeholder="npx" value="npx">
+            </div>
+          </div>
+          <div class="input-group">
+            <label>Arguments <span class="label-hint">(comma separated)</span></label>
+            <input type="text" id="input-args" required placeholder="-y, @modelcontextprotocol/server-filesystem, /path">
+          </div>
+          <div class="input-group">
+            <label>Environment Variables <span class="label-hint">(JSON, optional)</span></label>
+            <input type="text" id="input-env" placeholder='{"API_KEY": "your-key-here"}'>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="btn-cancel" onclick="toggleAddForm()">Cancel</button>
+            <button type="submit" class="btn-save">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              Add Server
+            </button>
+          </div>
+        </form>
       </div>
-      <div class="input-group">
-        <label>Command</label>
-        <input type="text" id="input-command" required placeholder="npx" value="npx">
-      </div>
-      <div class="input-group">
-        <label>Arguments (comma separated)</label>
-        <input type="text" id="input-args" required placeholder="-y, @modelcontextprotocol/server-filesystem, /path/to/folder">
-      </div>
-      <div class="input-group">
-        <label>Environment Variables (JSON format, optional)</label>
-        <input type="text" id="input-env" placeholder='{"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}'>
-      </div>
-      <button type="submit" class="save-btn">Add & Restart Session</button>
-    </form>
-  </div>
+    </div>
+  </section>
 
   <script src="settings.js"></script>
 </body>

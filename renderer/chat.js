@@ -217,7 +217,6 @@ function addSecurityEvent(eventPayload) {
   scrollToBottom();
 }
 
-
 function showTypingIndicator() {
   const existing = document.getElementById('typing-indicator');
   if (existing) return;
@@ -429,3 +428,138 @@ if (window.assistant.onSecurityAuditEvent) {
   });
 }
 
+// ─── ElevenLabs Speech to Text ───
+const btnMic = document.getElementById('btn-mic');
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecordingAudio = false;
+let spaceDownTimer = null;
+let spaceIsDown = false;
+
+async function startRecording() {
+  if (isRecordingAudio) return;
+  const apiKey = await window.assistant.getElevenLabsApiKey();
+  if (!apiKey) {
+    addMessage('error', 'Please set your ElevenLabs API key in the tray menu first.');
+    return;
+  }
+  
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+    audioChunks = [];
+    
+    mediaRecorder.addEventListener('dataavailable', event => {
+      if (event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
+    });
+
+    mediaRecorder.addEventListener('stop', async () => {
+      stream.getTracks().forEach(t => t.stop());
+      btnMic.classList.remove('recording');
+
+      if (audioChunks.length === 0) return;
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const apiFile = new File([audioBlob], 'audio.webm', { type: 'audio/webm' });
+
+      showTypingIndicator();
+      try {
+        const formData = new FormData();
+        formData.append('file', apiFile);
+        formData.append('model_id', 'scribe_v1');
+        
+        const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+          method: 'POST',
+          headers: {
+            'xi-api-key': apiKey
+          },
+          body: formData
+        });
+        
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error('ElevenLabs STT error: ' + errText);
+        }
+        
+        const data = await response.json();
+        const transcription = data.text;
+        hideTypingIndicator();
+        
+        if (transcription && transcription.trim()) {
+          inputField.value = transcription;
+          sendMessage();
+        }
+      } catch (err) {
+        hideTypingIndicator();
+        addMessage('error', err.message);
+      }
+    });
+
+    mediaRecorder.start();
+    isRecordingAudio = true;
+    btnMic.classList.add('recording');
+  } catch (err) {
+    addMessage('error', 'Microphone error: ' + err.message);
+  }
+}
+
+function stopRecording() {
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+  isRecordingAudio = false;
+  btnMic.classList.remove('recording');
+}
+
+btnMic.addEventListener('mousedown', () => {
+  startRecording();
+});
+btnMic.addEventListener('mouseup', () => {
+  stopRecording();
+});
+btnMic.addEventListener('mouseleave', () => {
+  if (isRecordingAudio) stopRecording();
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') {
+    if (spaceIsDown) return; 
+    spaceIsDown = true;
+    
+    // Prevent typing a space immediately so we can check if it's a hold
+    if (document.activeElement === inputField) {
+       e.preventDefault(); 
+    }
+    
+    spaceDownTimer = setTimeout(() => {
+      startRecording();
+    }, 250);
+  }
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.code === 'Space') {
+    spaceIsDown = false;
+    
+    if (spaceDownTimer) {
+      clearTimeout(spaceDownTimer);
+      spaceDownTimer = null;
+      
+      // If we didn't hold it long enough to record, insert the normal space
+      if (!isRecordingAudio) {
+        if (document.activeElement === inputField) {
+          const start = inputField.selectionStart;
+          const end = inputField.selectionEnd;
+          const val = inputField.value;
+          inputField.value = val.substring(0, start) + ' ' + val.substring(end);
+          inputField.selectionStart = inputField.selectionEnd = start + 1;
+        }
+      }
+    }
+    
+    if (isRecordingAudio) {
+      stopRecording();
+    }
+  }
+});

@@ -64,9 +64,19 @@ contextBridge.exposeInMainWorld('assistant', {
   // Vision / API key
   setApiKey: (key) => ipcRenderer.send('set-api-key', key),
   getApiKey: () => ipcRenderer.invoke('get-api-key'),
+  setElevenLabsApiKey: (key) => ipcRenderer.send('set-eleven-labs-api-key', key),
+  getElevenLabsApiKey: () => ipcRenderer.invoke('get-eleven-labs-api-key'),
 
   // MCP Servers
   getMcpServers: () => ipcRenderer.invoke('get-mcp-servers'),
   setMcpServers: (servers) => ipcRenderer.send('set-mcp-servers', servers),
 });
 
+contextBridge.exposeInMainWorld('electron', {
+  getAgents: () => ipcRenderer.invoke('get-agents'),
+  saveAgent: (config) => ipcRenderer.invoke('save-agent', config),
+  launchAgent: (agent) => ipcRenderer.send('launch-agent', agent),
+  getHistory: () => ipcRenderer.invoke('get-history'),
+  chooseContextFile: () => ipcRenderer.invoke('choose-context-file'),
+  onHistoryUpdated: (callback) => onChannel('history-updated', callback),
+});
