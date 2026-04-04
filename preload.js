@@ -60,5 +60,9 @@ contextBridge.exposeInMainWorld('assistant', {
   // Vision / API key
   setApiKey: (key) => ipcRenderer.send('set-api-key', key),
   getApiKey: () => ipcRenderer.invoke('get-api-key'),
+
+  // MCP Servers
+  getMcpServers: () => ipcRenderer.invoke('get-mcp-servers'),
+  setMcpServers: (servers) => ipcRenderer.send('set-mcp-servers', servers),
 });
 

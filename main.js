@@ -9,7 +9,7 @@ if (process.platform === 'linux') {
 const path = require('path');
 const { getTaskbarGeometry, getCharacterY } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
-const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getToolsEnabled, setToolsEnabled } = require('./sessions/agent-session');
+const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getToolsEnabled, setToolsEnabled, getMcpServers, setMcpServers } = require('./sessions/agent-session');
 const ClaudeSession = require('./sessions/claude-session');
 const CodexSession = require('./sessions/codex-session');
 const CopilotSession = require('./sessions/copilot-session');
@@ -706,6 +706,23 @@ function rebuildTrayMenu() {
     },
     { type: 'separator' },
     {
+      label: 'Manage MCP Servers...',
+      click: () => {
+        const settingsWin = new BrowserWindow({
+          width: 500,
+          height: 600,
+          title: 'MCP Server Configuration',
+          autoHideMenuBar: true,
+          webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false
+          }
+        });
+        settingsWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
+      }
+    },
+    {
       label: 'Set API Key...',
       click: () => {
         promptForApiKey();
@@ -878,6 +895,28 @@ ipcMain.handle('get-initial-state', () => {
 
 ipcMain.on('request-position', (event) => {
   // Initial position will be set by update loop
+});
+
+// ── MCP Servers IPC ──
+ipcMain.handle('get-mcp-servers', () => {
+  return getMcpServers();
+});
+
+ipcMain.on('set-mcp-servers', (event, servers) => {
+  // 1. Save to the JSON file
+  setMcpServers(servers);
+  console.log('[MCP] Updated server configs in settings file.');
+
+  // 2. Reboot the AI sessions so it connects to the new servers immediately
+  characters.forEach(c => {
+    if (c.session) {
+      c.session.terminate();
+      c.session.removeAllListeners();
+      c.session = null;
+    }
+    // Recreate session with new tools
+    c.createSession();
+  });
 });
 
 // ── Vision / Overlay IPC ──

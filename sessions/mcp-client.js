@@ -170,18 +170,25 @@ class McpClientManager extends EventEmitter {
       object: 'OBJECT'
     };
 
+    // Handle edge case where type might be an array (e.g., ["string", "null"])
+    let schemaType = schema.type;
+    if (Array.isArray(schemaType)) {
+      schemaType = schemaType.find(t => t !== 'null') || 'string';
+    }
+
     const result = {
-      type: typeMap[schema.type] || 'OBJECT'
+      type: typeMap[schemaType] || 'OBJECT'
     };
+
+    if (schema.description) {
+      result.description = schema.description;
+    }
 
     if (schema.properties) {
       result.properties = {};
       for (const [key, prop] of Object.entries(schema.properties)) {
-        result.properties[key] = {
-          type: typeMap[prop.type] || 'STRING',
-          description: prop.description || ''
-        };
-        if (prop.enum) result.properties[key].enum = prop.enum;
+        // Recursively convert nested properties
+        result.properties[key] = this._convertJsonSchemaToGemini(prop);
       }
     }
 
@@ -190,7 +197,12 @@ class McpClientManager extends EventEmitter {
     }
 
     if (schema.items) {
-      result.items = { type: typeMap[schema.items.type] || 'STRING' };
+      // Recursively convert array items
+      result.items = this._convertJsonSchemaToGemini(schema.items);
+    }
+    
+    if (schema.enum) {
+      result.enum = schema.enum;
     }
 
     return result;

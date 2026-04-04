@@ -1,6 +1,7 @@
 const { GoogleGenAI } = require('@google/genai');
 const EventEmitter = require('events');
 const McpClientManager = require('./mcp-client');
+const { getMcpServers } = require('./agent-session');
 
 /**
  * Gemini Vision API Session with MCP Tool Support.
@@ -68,7 +69,8 @@ class VisionSession extends EventEmitter {
       this.ai = new GoogleGenAI({ apiKey });
 
       // Initialize MCP client with built-in tools
-      await this.mcpClient.initialize();
+      const mcpConfigs = getMcpServers() || {};
+      await this.mcpClient.initialize(mcpConfigs);
 
       this.isRunning = true;
       this.emit('sessionReady');
