@@ -1,0 +1,223 @@
+/* renderer/control-centre/pages/chat/chat.css */
+
+.pf-page-chat {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+.pf-chat-sidebar {
+  width: 320px;
+  background: var(--pf-color-surface-secondary);
+  border-right: 1px solid var(--pf-color-border);
+  display: flex;
+  flex-direction: column;
+}
+
+.pf-chat-sidebar-header {
+  padding: var(--pf-spacing-lg);
+  border-bottom: 1px solid var(--pf-color-border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-md);
+}
+
+.pf-chat-sidebar-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pf-chat-sidebar-title h2 {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h2);
+  margin: 0;
+}
+
+.pf-chat-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--pf-spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pf-chat-list-item {
+  padding: var(--pf-spacing-md);
+  border-radius: var(--pf-radius-sm);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: background var(--pf-transition-fast);
+}
+
+.pf-chat-list-item:hover {
+  background: var(--pf-color-surface-hover);
+}
+.pf-chat-list-item.active {
+  background: var(--pf-color-surface-active);
+}
+
+.pf-chat-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.pf-chat-item-title {
+  font-weight: 600;
+  color: var(--pf-color-text-primary);
+  font-size: var(--pf-font-size-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+.pf-chat-item-time {
+  font-size: 11px;
+  color: var(--pf-color-text-muted);
+  margin-left: 8px;
+}
+
+.pf-chat-item-preview {
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Chat Main Area */
+.pf-chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--pf-color-surface-primary);
+}
+
+.pf-chat-main-header {
+  height: 64px;
+  padding: 0 var(--pf-spacing-xl);
+  border-bottom: 1px solid var(--pf-color-border);
+  display: flex;
+  align-items: center;
+  gap: var(--pf-spacing-md);
+  background: var(--pf-color-surface-secondary);
+}
+
+.pf-chat-agent-info {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-spacing-sm);
+}
+.pf-chat-agent-details {
+  display: flex;
+  flex-direction: column;
+}
+.pf-chat-agent-name {
+  font-weight: 600;
+  font-size: var(--pf-font-size-body);
+  color: var(--pf-color-text-primary);
+}
+.pf-chat-agent-role {
+  font-size: 11px;
+  color: var(--pf-color-text-muted);
+}
+
+.pf-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--pf-spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-lg);
+}
+
+/* Individual Messages */
+.pf-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 85%;
+}
+
+.pf-message--user {
+  align-self: flex-end;
+}
+.pf-message--user .pf-message-bubble {
+  background: var(--pf-color-accent-primary);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.pf-message--assistant {
+  align-self: flex-start;
+}
+.pf-message--assistant .pf-message-bubble {
+  background: var(--pf-color-surface-secondary);
+  color: var(--pf-color-text-primary);
+  border: 1px solid var(--pf-color-border);
+  border-bottom-left-radius: 4px;
+}
+
+.pf-message-bubble {
+  padding: var(--pf-spacing-md) var(--pf-spacing-lg);
+  border-radius: var(--pf-radius-lg);
+  font-size: var(--pf-font-size-body);
+  line-height: 1.5;
+}
+
+.pf-chat-input-area {
+  padding: var(--pf-spacing-lg) var(--pf-spacing-xl);
+  background: var(--pf-color-surface-primary);
+  border-top: 1px solid var(--pf-color-border);
+}
+
+.pf-chat-input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  background: var(--pf-color-surface-secondary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-lg);
+  padding: 8px;
+  transition: border-color var(--pf-transition-fast);
+}
+.pf-chat-input-wrapper:focus-within {
+  border-color: var(--pf-color-accent-primary);
+}
+
+.pf-chat-input-wrapper textarea {
+  flex: 1;
+  border: none;
+  background: transparent;
+  resize: none;
+  min-height: 24px;
+  max-height: 200px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: var(--pf-font-size-body);
+  color: var(--pf-color-text-primary);
+  outline: none;
+}
+
+.pf-chat-input-actions {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+}
+
+.pf-chat-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--pf-color-text-secondary);
+  text-align: center;
+}
+/* Reused Markdown styles from component/typography */
+.pf-message-bubble h1, .pf-message-bubble h2, .pf-message-bubble h3 { margin-top: 1em; margin-bottom: 0.5em; }
+.pf-message-bubble p { margin-bottom: 1em; }
+.pf-message-bubble pre { background: var(--pf-color-surface-tertiary); padding: 12px; border-radius: 8px; overflow-x: auto; margin: 1em 0; }
+.pf-message-bubble code { font-family: var(--pf-font-mono); font-size: 0.9em; }

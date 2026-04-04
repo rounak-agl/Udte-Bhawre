@@ -10,7 +10,7 @@ async function connectDB(uri) {
   }
   try {
     await mongoose.connect(uri, {
-      serverSelectionTimeoutMS: 5000, // Fail fast if unreachable
+      serverSelectionTimeoutMS: 10000, // Fail fast if unreachable
     });
     isConnected = true;
     console.log('[DB] Connected to MongoDB successfully.');
@@ -53,13 +53,26 @@ const chatSessionSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+const taskSchema = new mongoose.Schema({
+  title: { type: String, required: true },
+  description: { type: String, default: '' },
+  status: { type: String, enum: ['todo', 'in-progress', 'done'], default: 'todo' },
+  priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+  agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Agent' },
+  createdAt: { type: Date, default: Date.now }
+});
+
+
+
 // Models
 const Agent = mongoose.model('Agent', agentSchema);
 const ChatSession = mongoose.model('ChatSession', chatSessionSchema);
+const Task = mongoose.model('Task', taskSchema);
 
 module.exports = {
   connectDB,
   isDBConnected,
   Agent,
-  ChatSession
+  ChatSession,
+  Task
 };

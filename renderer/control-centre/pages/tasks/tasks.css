@@ -1,0 +1,119 @@
+/* renderer/control-centre/pages/tasks/tasks.css */
+
+.pf-page-tasks {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.pf-tasks-header {
+  padding: var(--pf-spacing-xl) var(--pf-spacing-xl) 0 var(--pf-spacing-xl);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pf-tasks-title {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h2);
+  color: var(--pf-color-text-primary);
+  margin: 0;
+}
+
+.pf-tasks-controls {
+  display: flex;
+  gap: var(--pf-spacing-md);
+  align-items: center;
+}
+
+/* Kanban Board */
+.pf-kanban-board {
+  flex: 1;
+  display: flex;
+  gap: var(--pf-spacing-xl);
+  padding: var(--pf-spacing-xl);
+  overflow-x: auto;
+}
+
+.pf-kanban-column {
+  flex: 1;
+  min-width: 280px;
+  background: var(--pf-color-surface-secondary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-lg);
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+
+.pf-kanban-col-header {
+  padding: var(--pf-spacing-lg);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--pf-color-border);
+}
+
+.pf-kanban-col-title {
+  font-weight: 600;
+  font-size: var(--pf-font-size-body);
+  color: var(--pf-color-text-primary);
+}
+
+.pf-kanban-col-count {
+  font-size: 11px;
+  background: var(--pf-color-surface-tertiary);
+  padding: 4px 8px;
+  border-radius: var(--pf-radius-full);
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-kanban-items {
+  flex: 1;
+  padding: var(--pf-spacing-md);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-sm);
+}
+
+/* Kanban Task Card */
+.pf-kanban-card {
+  background: var(--pf-color-surface-primary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-md);
+  padding: var(--pf-spacing-md);
+  cursor: grab;
+  transition: transform var(--pf-transition-fast), box-shadow var(--pf-transition-fast);
+}
+.pf-kanban-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--pf-shadow-sm);
+}
+.pf-kanban-card:active {
+  cursor: grabbing;
+}
+
+.pf-kanban-card-title {
+  font-weight: 500;
+  color: var(--pf-color-text-primary);
+  font-size: var(--pf-font-size-body);
+  margin-bottom: var(--pf-spacing-sm);
+}
+
+.pf-kanban-card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--pf-spacing-md);
+}
+
+.pf-kanban-empty {
+  text-align: center;
+  padding: var(--pf-spacing-xl);
+  color: var(--pf-color-text-muted);
+  font-size: var(--pf-font-size-caption);
+  border: 2px dashed var(--pf-color-border);
+  border-radius: var(--pf-radius-md);
+  margin-top: var(--pf-spacing-md);
+}

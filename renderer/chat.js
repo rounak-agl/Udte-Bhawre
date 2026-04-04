@@ -36,61 +36,7 @@ const providerNames = {
 };
 
 // ─── Markdown → HTML renderer ───
-function renderMarkdown(text) {
-  // 1. Extract code blocks BEFORE escaping (so backticks survive)
-  const codeBlocks = [];
-  // Strip bbox blocks entirely
-  text = text.replace(/```bbox\s*\n?[\s\S]*?```/g, '');
-  // Extract fenced code blocks
-  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    const placeholder = `%%CODEBLOCK_${codeBlocks.length}%%`;
-    codeBlocks.push(`<pre class="md-code-block"><code>${escapeHtml(code.trim())}</code></pre>`);
-    return placeholder;
-  });
-  // Extract inline code
-  const inlineCodes = [];
-  text = text.replace(/`([^`]+)`/g, (_, code) => {
-    const placeholder = `%%INLINECODE_${inlineCodes.length}%%`;
-    inlineCodes.push(`<code class="md-inline-code">${escapeHtml(code)}</code>`);
-    return placeholder;
-  });
-
-  // 2. Now escape the remaining HTML
-  let html = escapeHtml(text);
-
-  // 3. Bold (non-greedy)
-  html = html.replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>');
-
-  // 4. Italic (non-greedy)
-  html = html.replace(/\*([\s\S]*?)\*/g, '<em>$1</em>');
-
-  // 5. Headings (### h3, ## h2, # h1)
-  html = html.replace(/^### (.+)$/gm, '<h4 class="md-heading">$1</h4>');
-  html = html.replace(/^## (.+)$/gm, '<h3 class="md-heading">$1</h3>');
-  html = html.replace(/^# (.+)$/gm, '<h3 class="md-heading">$1</h3>');
-
-  // 6. Unordered list items
-  html = html.replace(/^[\-\*] (.+)$/gm, '<li class="md-list-item">$1</li>');
-
-  // 7. Ordered list items
-  html = html.replace(/^\d+\. (.+)$/gm, '<li class="md-list-item md-ordered">$1</li>');
-
-  // 8. Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="md-link" target="_blank">$1</a>');
-
-  // 9. Line breaks
-  html = html.replace(/\n/g, '<br>');
-
-  // 10. Restore code blocks and inline code
-  codeBlocks.forEach((block, i) => {
-    html = html.replace(`%%CODEBLOCK_${i}%%`, block);
-  });
-  inlineCodes.forEach((code, i) => {
-    html = html.replace(`%%INLINECODE_${i}%%`, code);
-  });
-
-  return html;
-}
+// Migrated to PFMarkdown (renderer/control-centre/core/markdown.js)
 
 function formatTitle(providerKey, format) {
   const name = providerNames[providerKey] || 'Claude';
@@ -136,7 +82,7 @@ function addMessage(role, text) {
   contentDiv.className = 'message-content';
   // User messages stay plain text, assistant messages get markdown rendering
   if (role === 'assistant') {
-    contentDiv.innerHTML = renderMarkdown(text);
+    contentDiv.innerHTML = window.PFMarkdown ? window.PFMarkdown.render(text) : text;
   } else {
     contentDiv.textContent = text;
   }
@@ -151,7 +97,7 @@ function addToolMessage(text, isError = false) {
   msgDiv.className = 'message tool-message';
   const contentDiv = document.createElement('div');
   contentDiv.className = 'message-content';
-  contentDiv.innerHTML = `<span class="tool-icon">⚙</span> ${escapeHtml(text)}`;
+  contentDiv.innerHTML = `<span class="tool-icon">⚙</span> ${window.PFMarkdown ? window.PFMarkdown.escapeHtml(text) : text}`;
   if (isError) contentDiv.style.color = 'var(--error-color)';
   msgDiv.appendChild(contentDiv);
   messagesEl.appendChild(msgDiv);
@@ -258,7 +204,7 @@ function appendStreamingText(text) {
   }
   lastAssistantText += text;
   // Re-render markdown on each chunk for live formatting
-  streamingMessageEl.innerHTML = renderMarkdown(lastAssistantText);
+  streamingMessageEl.innerHTML = window.PFMarkdown ? window.PFMarkdown.render(lastAssistantText) : lastAssistantText;
   scrollToBottom();
 }
 
@@ -272,11 +218,7 @@ function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
+// (Removed escapeHtml, now in PFMarkdown)
 
 // ─── Slash commands ───
 function handleSlashCommand(cmd) {

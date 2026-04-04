@@ -1,0 +1,156 @@
+/* renderer/control-centre/core/extras.css */
+
+/* Command Palette Overlay */
+.pf-palette-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 15vh;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--pf-transition-fast);
+}
+
+.pf-palette-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pf-palette-box {
+  background: var(--pf-color-surface-primary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-lg);
+  box-shadow: var(--pf-shadow-lg);
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transform: translateY(-20px);
+  transition: transform var(--pf-transition-fast);
+}
+.pf-palette-overlay.active .pf-palette-box {
+  transform: translateY(0);
+}
+
+.pf-palette-search-wrap {
+  display: flex;
+  align-items: center;
+  padding: 0 var(--pf-spacing-xl);
+  border-bottom: 1px solid var(--pf-color-border);
+}
+
+.pf-palette-search-icon {
+  width: 20px;
+  height: 20px;
+  opacity: 0.5;
+}
+
+.pf-palette-input {
+  flex: 1;
+  padding: var(--pf-spacing-xl) var(--pf-spacing-md);
+  font-size: var(--pf-font-size-h3);
+  font-family: var(--pf-font-body);
+  border: none;
+  background: transparent;
+  color: var(--pf-color-text-primary);
+  outline: none;
+}
+
+.pf-palette-results {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: var(--pf-spacing-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pf-palette-row {
+  padding: var(--pf-spacing-md);
+  border-radius: var(--pf-radius-md);
+  display: flex;
+  align-items: center;
+  gap: var(--pf-spacing-md);
+  cursor: pointer;
+  transition: background var(--pf-transition-fast);
+}
+
+.pf-palette-row.active {
+  background: var(--pf-color-surface-hover);
+}
+
+.pf-palette-row-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pf-color-surface-secondary);
+  border-radius: var(--pf-radius-sm);
+  font-size: 18px;
+}
+
+.pf-palette-row-info {
+  flex: 1;
+}
+
+.pf-palette-row-title {
+  font-weight: 600;
+  color: var(--pf-color-text-primary);
+}
+
+.pf-palette-row-subtitle {
+  font-size: 12px;
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-palette-no-results {
+  padding: 32px;
+  text-align: center;
+  color: var(--pf-color-text-muted);
+}
+
+
+
+/* Dashboard Chart Refinement */
+.pf-chart-container {
+  height: 180px;
+  display: flex;
+  align-items: flex-end;
+}
+.pf-chart-bars {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  height: 100%;
+  padding-top: 20px;
+}
+.pf-chart-bar-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.pf-chart-bar {
+  width: 32px;
+  background: var(--pf-color-primary);
+  border-radius: 4px 4px 0 0;
+  opacity: 0.3;
+  transition: height 0.5s ease;
+}
+.pf-chart-bar.current {
+  opacity: 1;
+  box-shadow: 0 0 15px var(--pf-color-primary);
+}
+.pf-chart-label {
+  font-size: 11px;
+  color: var(--pf-color-text-muted);
+}

@@ -1,0 +1,109 @@
+/* renderer/control-centre/pages/agents/agents.css */
+
+.pf-page-agents {
+  padding: var(--pf-spacing-4xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-xl);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.pf-agents-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pf-agents-title {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h2);
+  color: var(--pf-color-text-primary);
+  margin: 0;
+}
+
+.pf-agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--pf-spacing-xl);
+}
+
+.pf-agent-card {
+  background: var(--pf-color-surface-secondary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-lg);
+  padding: var(--pf-spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-md);
+  transition: transform var(--pf-transition-fast), box-shadow var(--pf-transition-fast);
+}
+
+.pf-agent-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--pf-shadow-md);
+}
+
+.pf-agent-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-spacing-md);
+}
+
+.pf-agent-info {
+  flex: 1;
+}
+
+.pf-agent-name {
+  font-family: var(--pf-font-display);
+  font-weight: 600;
+  font-size: var(--pf-font-size-h3);
+  color: var(--pf-color-text-primary);
+  margin-bottom: 2px;
+}
+
+.pf-agent-role {
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-agent-status {
+  padding: 4px 8px;
+  border-radius: var(--pf-radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--pf-color-surface-tertiary);
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-agent-status.active {
+  background: rgba(46, 125, 50, 0.1);
+  color: var(--pf-color-success);
+}
+
+.pf-agent-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-xs);
+  margin-top: var(--pf-spacing-md);
+}
+
+.pf-agent-detail-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--pf-font-size-caption);
+}
+.pf-agent-detail-label {
+  color: var(--pf-color-text-muted);
+}
+.pf-agent-detail-value {
+  color: var(--pf-color-text-primary);
+  font-weight: 500;
+}
+
+.pf-agent-actions {
+  display: flex;
+  gap: var(--pf-spacing-sm);
+  margin-top: auto;
+  padding-top: var(--pf-spacing-lg);
+}

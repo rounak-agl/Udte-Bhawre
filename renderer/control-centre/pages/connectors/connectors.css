@@ -1,0 +1,196 @@
+/* renderer/control-centre/pages/connectors/connectors.css */
+
+.pf-page-connectors {
+  padding: var(--pf-spacing-4xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-xl);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.pf-connectors-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pf-connectors-title {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h2);
+  color: var(--pf-color-text-primary);
+  margin: 0;
+}
+
+.pf-connectors-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--pf-spacing-xl);
+}
+
+.pf-connector-card {
+  background: var(--pf-color-surface-secondary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-lg);
+  padding: var(--pf-spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-md);
+}
+
+.pf-connector-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-spacing-md);
+}
+
+.pf-connector-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-color-surface-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.pf-connector-info {
+  flex: 1;
+}
+
+.pf-connector-name {
+  font-weight: 600;
+  font-size: var(--pf-font-size-h3);
+  color: var(--pf-color-text-primary);
+}
+
+.pf-connector-desc {
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-connector-status {
+  padding: 4px 8px;
+  border-radius: var(--pf-radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pf-connector-status.connected {
+  background: rgba(46, 125, 50, 0.1);
+  color: var(--pf-color-success);
+}
+
+.pf-connector-status.disconnected {
+  background: var(--pf-color-surface-tertiary);
+  color: var(--pf-color-text-muted);
+}
+
+.pf-connector-actions {
+  margin-top: auto;
+  padding-top: var(--pf-spacing-md);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pf-spacing-sm);
+}
+
+/* Modal Overlay */
+.pf-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  opacity: 0;
+  animation: pf-fade-in 0.2s forwards;
+}
+
+@keyframes pf-fade-in {
+  to { opacity: 1; }
+}
+
+.pf-modal-container {
+  background: var(--pf-color-surface-secondary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-xl);
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  animation: pf-slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes pf-slide-up {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.pf-modal-header {
+  padding: var(--pf-spacing-xl);
+  border-bottom: 1px solid var(--pf-color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pf-modal-title {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h3);
+  margin: 0;
+  color: var(--pf-color-text-primary);
+}
+
+.pf-modal-body {
+  padding: var(--pf-spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-lg);
+}
+
+.pf-modal-footer {
+  padding: var(--pf-spacing-lg) var(--pf-spacing-xl);
+  border-top: 1px solid var(--pf-color-border);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pf-spacing-md);
+  background: var(--pf-color-surface-tertiary);
+}
+
+.pf-form-row--env {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-xs);
+}
+
+.pf-env-textarea {
+  width: 100%;
+  min-height: 100px;
+  padding: var(--pf-spacing-md);
+  background: var(--pf-color-surface-tertiary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-md);
+  color: var(--pf-color-text-primary);
+  font-family: var(--pf-font-mono);
+  font-size: 13px;
+  resize: vertical;
+  outline: none;
+}
+
+.pf-env-textarea:focus {
+  border-color: var(--pf-color-primary);
+}
+
+.pf-env-desc {
+  font-size: 11px;
+  color: var(--pf-color-text-muted);
+}

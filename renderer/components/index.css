@@ -1,0 +1,4 @@
+/* renderer/components/index.css */
+@import url('./tier1-primitives.css');
+@import url('./tier2-composed.css');
+@import url('./tier3-layout.css');

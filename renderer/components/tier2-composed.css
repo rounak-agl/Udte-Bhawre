@@ -1,0 +1,108 @@
+/* renderer/components/tier2-composed.css */
+
+/* --- PFCard --- */
+.pf-card {
+  background: var(--pf-color-surface-secondary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pf-card-img {
+  width: 100%;
+  height: 140px;
+  object-fit: cover;
+  border-bottom: 1px solid var(--pf-color-border);
+}
+
+.pf-card-body {
+  padding: var(--pf-spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-sm);
+}
+.pf-card--compact .pf-card-body {
+  padding: var(--pf-spacing-md);
+}
+
+.pf-card-title {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h3);
+  font-weight: 600;
+  color: var(--pf-color-text-primary);
+  margin: 0;
+}
+
+.pf-card-subtitle {
+  font-family: var(--pf-font-body);
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-card-content {
+  font-size: var(--pf-font-size-body);
+  color: var(--pf-color-text-primary);
+  margin-top: var(--pf-spacing-xs);
+}
+
+.pf-card-footer {
+  padding: var(--pf-spacing-md) var(--pf-spacing-xl);
+  border-top: 1px solid var(--pf-color-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--pf-spacing-sm);
+  background: var(--pf-color-surface-tertiary);
+}
+
+/* --- PFToast --- */
+#pf-toast-container {
+  position: fixed;
+  bottom: var(--pf-spacing-xl);
+  right: var(--pf-spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-sm);
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.pf-toast {
+  background: var(--pf-color-surface-secondary);
+  border-left: 4px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-md);
+  box-shadow: var(--pf-shadow-md);
+  padding: var(--pf-spacing-md) var(--pf-spacing-xl);
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+  min-width: 280px;
+  max-width: 400px;
+  animation: slideInUp var(--pf-transition-normal) forwards;
+}
+
+.pf-toast--success { border-color: var(--pf-color-success); }
+.pf-toast--error { border-color: var(--pf-color-danger); }
+
+.pf-toast-title {
+  font-weight: 600;
+  font-size: var(--pf-font-size-body);
+  color: var(--pf-color-text-primary);
+}
+.pf-toast-message {
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-secondary);
+  margin-top: 2px;
+}
+
+@keyframes slideInUp {
+  0% { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes fadeOut {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}

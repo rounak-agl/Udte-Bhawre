@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Content Security Policy to allow inline styles, fonts for fonts.googleapis, etc. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data:;">
+  <title>Astrophage Control Centre</title>
+  
+  <!-- CSS Imports -->
+  <link rel="stylesheet" href="../design-system/tokens.css">
+  <link rel="stylesheet" href="../components/index.css">
+  <link rel="stylesheet" href="./control-centre.css">
+  <link rel="stylesheet" href="./pages/dashboard/dashboard.css">
+  <link rel="stylesheet" href="./pages/chat/chat.css">
+  <link rel="stylesheet" href="./pages/tasks/tasks.css">
+  <link rel="stylesheet" href="./pages/agents/agents.css">
+  <link rel="stylesheet" href="./pages/connectors/connectors.css">
+  <link rel="stylesheet" href="./pages/settings/settings.css">
+  <link rel="stylesheet" href="./pages/activity/activity.css">
+  <link rel="stylesheet" href="./core/extras.css">
+  <!-- We will add page styles here later -->
+
+</head>
+<body>
+  <div id="pf-root"></div>
+
+  <!-- Design System & Tokens -->
+  <script src="../design-system/tokens.js"></script>
+
+  <!-- Utils & Data -->
+  <script src="./core/utils.js"></script>
+  <script src="./core/icons.js"></script>
+  <script src="./core/mock-data.js"></script>
+
+  <!-- Component Library -->
+  <script src="../components/tier1-primitives.js"></script>
+  <script src="../components/tier2-composed.js"></script>
+  <script src="../components/tier3-layout.js"></script>
+  <script src="../components/index.js"></script>
+
+  <!-- Core Infrastructure -->
+  <script src="./core/store.js"></script>
+  <script src="./core/router.js"></script>
+  <script src="./core/markdown.js"></script>
+  <script src="./core/command-palette.js"></script>
+  
+  <!-- Pages (will be loaded before boot, mocks for now) -->
+  <script>
+    function renderPlaceholder(name) {
+      return () => PFUtils.el('div', '', { 
+        innerHTML: `<h1>${name}</h1><p>Under construction...</p>`, 
+        style: 'padding: 32px;' 
+      });
+    }
+  </script>
+  <script src="./pages/dashboard/dashboard-page.js"></script>
+  <script src="./pages/chat/chat-page.js"></script>
+  <script src="./pages/tasks/tasks-page.js"></script>
+  <script src="./pages/agents/agents-page.js"></script>
+  <script src="./pages/connectors/connectors-page.js"></script>
+  <script src="./pages/settings/settings-page.js"></script>
+  <script src="./pages/activity/activity-page.js"></script>
+  <!-- End Pages -->
+
+  <!-- Boot -->
+  <script src="./core/extras.js"></script>
+  <script src="./core/boot.js"></script>
+</body>
+</html>

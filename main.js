@@ -15,7 +15,7 @@ runBootstrap();
 const { getTaskbarGeometry, getCharacterY } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
 const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getElevenLabsApiKey, setElevenLabsApiKey, getMongodbUri, setMongodbUri, getToolsEnabled, setToolsEnabled, getMcpServers, setMcpServers } = require('./sessions/agent-session');
-const { connectDB, isDBConnected, Agent, ChatSession } = require('./utils/db');
+const { connectDB, isDBConnected, Agent, ChatSession, Task } = require('./utils/db');
 const ClaudeSession = require('./sessions/claude-session');
 const CodexSession = require('./sessions/codex-session');
 const CopilotSession = require('./sessions/copilot-session');
@@ -635,6 +635,8 @@ class Character {
   }
 }
 
+const { initControlCentre, openControlCentre } = require('./main-cc');
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  App Lifecycle
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -654,8 +656,11 @@ app.whenReady().then(async () => {
     console.error('[DB] Connection/Load failed:', e);
   }
 
-  // Create Dashboard Window
-  createDashboardWindow();
+  // Create Control Centre (Unified Dashboard)
+  openControlCentre('dashboard');
+  
+  // Init Control Centre
+  initControlCentre({ characters });
 
   setupTray();
   startUpdateLoop();
@@ -797,30 +802,37 @@ function rebuildTrayMenu() {
       }
     },
     {
+      label: 'Set ElevenLabs Key...',
+      click: () => {
+        openControlCentre('settings');
+      }
+    },
+    {
       label: 'Set MongoDB URI...',
       click: () => {
-        promptForApiKeyInput('MongoDB URI', 'mongodb.com', 'MONGO_URI:', async key => {
-          setMongodbUri(key);
-          const connected = await connectDB(key);
-          if (connected) {
-            await loadAllAgentsFromDB();
-          }
-        });
+        openControlCentre('settings');
       }
     },
     { type: 'separator' },
     {
       label: 'Open Dashboard',
       click: () => {
-        createDashboardWindow();
+        openControlCentre('dashboard');
       }
     },
     {
       label: 'Set API Key...',
       click: () => {
-        promptForApiKey();
+        openControlCentre('settings');
       }
     },
+    {
+      label: 'Control Centre',
+      click: () => {
+        openControlCentre('dashboard');
+      }
+    },
+    { type: 'separator' },
     {
       label: 'Quit',
       click: () => {
@@ -1041,7 +1053,17 @@ ipcMain.on('copy-last-response', (event) => {
 ipcMain.handle('get-initial-state', () => {
   return {
     provider: getCurrentProvider(),
-    theme: getCurrentTheme()
+    theme: getCurrentTheme(),
+    user: { name: 'User', avatar: 'U' },
+    agents: characters.map(c => ({
+      id: c.agentId || c.name,
+      name: c.name,
+      color: c.color,
+      provider: c.provider || getCurrentProvider(),
+      status: c.session ? 'active' : 'idle',
+      personality: '',
+      role: ''
+    }))
   };
 });
 
@@ -1092,12 +1114,51 @@ ipcMain.handle('get-api-key', () => {
   return getApiKey();
 });
 
+// ── Theme / Provider IPC (from CC Settings) ──
+ipcMain.on('set-theme', (event, theme) => {
+  setCurrentTheme(theme);
+  characters.forEach(c => {
+    if (c.chatWindow && !c.chatWindow.isDestroyed()) {
+      c.chatWindow.webContents.send('theme-change', theme);
+    }
+  });
+  BrowserWindow.getAllWindows().forEach(win => {
+    win.webContents.send('theme-change', theme);
+  });
+  rebuildTrayMenu();
+});
+
+ipcMain.on('set-provider', (event, providerKey) => {
+  setCurrentProvider(providerKey);
+  characters.forEach(c => {
+    if (c.session) {
+      c.session.terminate();
+      c.session.removeAllListeners();
+      c.session = null;
+    }
+    if (c.chatWindow && !c.chatWindow.isDestroyed()) {
+      c.chatWindow.webContents.send('provider-change', providerKey);
+      c.chatWindow.webContents.send('chat-turn-complete');
+    }
+    c.createSession();
+  });
+  rebuildTrayMenu();
+});
+
 ipcMain.on('set-eleven-labs-api-key', (event, key) => {
   setElevenLabsApiKey(key);
 });
 
 ipcMain.handle('get-eleven-labs-api-key', () => {
   return getElevenLabsApiKey();
+});
+
+ipcMain.on('set-mongodb-uri', (event, uri) => {
+  setMongodbUri(uri);
+});
+
+ipcMain.handle('get-mongodb-uri', () => {
+  return getMongodbUri();
 });
 
 ipcMain.on('fly-to-element', (event, element) => {
@@ -1344,6 +1405,87 @@ ipcMain.handle('choose-context-file', async () => {
   return null;
 });
 
+// ── Task Management IPC ──
+ipcMain.handle('get-tasks', async () => {
+  if (!isDBConnected()) return [];
+  try {
+    const tasks = await Task.find().populate('agentId').sort({ createdAt: -1 });
+    return tasks.map(t => {
+      const obj = t.toObject();
+      obj._id = obj._id.toString();
+      if (obj.agentId && obj.agentId._id) {
+        obj.agentId._id = obj.agentId._id.toString();
+      }
+      return obj;
+    });
+  } catch (err) {
+    console.error('[DB] get-tasks error:', err.message);
+    return [];
+  }
+});
+
+ipcMain.handle('save-task', async (event, taskData) => {
+  if (!isDBConnected()) return false;
+  try {
+    if (taskData._id) {
+      await Task.findByIdAndUpdate(taskData._id, taskData);
+    } else {
+      await Task.create(taskData);
+    }
+    return true;
+  } catch (err) {
+    console.error('[DB] save-task error:', err.message);
+    return false;
+  }
+});
+
+ipcMain.handle('delete-task', async (event, id) => {
+  if (!isDBConnected()) return false;
+  try {
+    await Task.findByIdAndDelete(id);
+    return true;
+  } catch (err) {
+    console.error('[DB] delete-task error:', err.message);
+    return false;
+  }
+});
+
+// ── Specific Chat History IPC ──
+ipcMain.handle('get-chat-messages', async (event, sessionId) => {
+  if (!isDBConnected()) return [];
+  try {
+    const session = await ChatSession.findById(sessionId);
+    return session ? session.toObject().messages : [];
+  } catch (err) {
+    console.error('[DB] get-chat-messages error:', err.message);
+    return [];
+  }
+});
+
+// ── Agent Management IPC ──
+ipcMain.handle('delete-agent', async (event, id) => {
+  if (!isDBConnected()) return false;
+  try {
+    // 1. Find and destroy active character instance if running
+    const charIndex = characters.findIndex(c => c.agentId === id.toString());
+    if (charIndex !== -1) {
+      const char = characters[charIndex];
+      char.destroy();
+      characters.splice(charIndex, 1);
+      rebuildTrayMenu();
+    }
+
+    // 2. Delete from Database
+    await Agent.findByIdAndDelete(id);
+    return true;
+  } catch (err) {
+    console.error('[DB] delete-agent error:', err.message);
+    return false;
+  }
+});
+
+
+
 function promptForApiKeyInput(titleText, linkText, prefix, onSave) {
   const inputWin = new BrowserWindow({
     width: 450,
@@ -1392,3 +1534,21 @@ function promptForApiKeyInput(titleText, linkText, prefix, onSave) {
     }
   });
 }
+
+
+module.exports = { 
+  launchAgentInstance, 
+  openControlCentre,
+  createSessionForAgent: (agentObj) => {
+    // Shared utility for background/CC chat (though currently read-only)
+    const providerKey = agentObj.provider || getCurrentProvider();
+    switch (providerKey) {
+      case 'vision': return new VisionSession(screenCapture);
+      case 'claude': return new ClaudeSession();
+      case 'codex': return new CodexSession();
+      case 'copilot': return new CopilotSession();
+      case 'gemini': return new GeminiSession();
+      default: return new VisionSession(screenCapture);
+    }
+  }
+};

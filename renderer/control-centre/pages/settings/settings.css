@@ -1,0 +1,141 @@
+/* renderer/control-centre/pages/settings/settings.css */
+
+.pf-page-settings {
+  display: flex;
+  height: 100%;
+}
+
+/* Settings Nav Sidebar */
+.pf-settings-nav {
+  width: 240px;
+  background: var(--pf-color-surface-secondary);
+  border-right: 1px solid var(--pf-color-border);
+  padding: var(--pf-spacing-xl) 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.pf-settings-nav-title {
+  padding: 0 var(--pf-spacing-xl);
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h3);
+  margin-bottom: var(--pf-spacing-lg);
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-settings-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pf-settings-menu-item {
+  padding: var(--pf-spacing-sm) var(--pf-spacing-xl);
+  cursor: pointer;
+  color: var(--pf-color-text-primary);
+  font-weight: 500;
+  transition: all var(--pf-transition-fast);
+  border-left: 3px solid transparent;
+}
+
+.pf-settings-menu-item:hover {
+  background: var(--pf-color-surface-hover);
+}
+
+.pf-settings-menu-item.active {
+  background: var(--pf-color-surface-active);
+  border-left-color: var(--pf-color-accent-primary);
+  color: var(--pf-color-accent-primary);
+}
+
+/* Settings Content */
+.pf-settings-content {
+  flex: 1;
+  padding: var(--pf-spacing-4xl);
+  overflow-y: auto;
+  max-width: 800px;
+}
+
+.pf-settings-section {
+  display: none; /* Hidden by default */
+  flex-direction: column;
+  gap: var(--pf-spacing-xl);
+  animation: fadeIn 200ms ease;
+}
+
+.pf-settings-section.active {
+  display: flex;
+}
+
+.pf-settings-section-title {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h2);
+  margin-bottom: var(--pf-spacing-md);
+  color: var(--pf-color-text-primary);
+  padding-bottom: var(--pf-spacing-md);
+  border-bottom: 1px solid var(--pf-color-border);
+}
+
+/* Form Groups */
+.pf-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-sm);
+}
+
+.pf-form-row {
+  display: flex;
+  gap: var(--pf-spacing-sm);
+  align-items: flex-end;
+}
+
+.pf-form-desc {
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-muted);
+}
+
+/* Theme Picker Cards */
+.pf-theme-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--pf-spacing-lg);
+}
+
+.pf-theme-card {
+  border: 2px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-lg);
+  padding: var(--pf-spacing-lg);
+  cursor: pointer;
+  transition: all var(--pf-transition-fast);
+  background: var(--pf-color-surface-secondary);
+}
+
+.pf-theme-card:hover {
+  border-color: var(--pf-color-text-muted);
+}
+
+.pf-theme-card.active {
+  border-color: var(--pf-color-accent-primary);
+  background: var(--pf-color-surface-active);
+}
+
+.pf-theme-preview {
+  height: 60px;
+  border-radius: var(--pf-radius-md);
+  margin-bottom: var(--pf-spacing-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  color: var(--pf-color-text-primary);
+}
+
+.pf-theme-preview-midnight { background: #1E2521; border: 1px solid #2A332E; color: #E8E4DF;}
+.pf-theme-preview-peach { background: #FFF5F2; border: 1px solid #FFE4DC; color: #E05C43;}
+.pf-theme-preview-moss { background: #F0F4F1; border: 1px solid #E4ECE7; color: #295F43;}
+.pf-theme-preview-cloud { background: #F2F6FF; border: 1px solid #E2EBFE; color: #4A7AFA;}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

@@ -1,0 +1,129 @@
+/* renderer/design-system/tokens.css */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap');
+/* Fallback for Awesome Serif if local OTF isn't present */
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+:root {
+  /* Colors - Light Theme (Default) */
+  --pf-color-surface-primary: #F5EDE3;
+  --pf-color-surface-secondary: #FFFFFF;
+  --pf-color-surface-tertiary: #F7F7F5;
+  --pf-color-surface-hover: #F7F4F0;
+  --pf-color-surface-active: #F0EBE4;
+  --pf-color-text-primary: #1A2E22;
+  --pf-color-text-secondary: #4A5D52;
+  --pf-color-text-muted: #8A9690;
+  --pf-color-accent-primary: #1A3C2A;
+  --pf-color-accent-hover: #25503A;
+  --pf-color-accent-soft: #E8DFD3;
+  
+  --pf-color-border: #E2D9CD;
+  --pf-color-danger: #D32F2F;
+  --pf-color-success: #2E7D32;
+  --pf-color-warning: #ED6C02;
+  --pf-color-info: #0288D1;
+
+  /* Typography */
+  --pf-font-display: 'Awesome Serif', 'Playfair Display', serif;
+  --pf-font-body: 'Archivo', sans-serif;
+  --pf-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --pf-font-size-display: 40px;
+  --pf-font-size-h1: 28px;
+  --pf-font-size-h2: 22px;
+  --pf-font-size-h3: 16px;
+  --pf-font-size-body: 14px;
+  --pf-font-size-caption: 12px;
+
+  /* Spacing */
+  --pf-spacing-xs: 4px;
+  --pf-spacing-sm: 8px;
+  --pf-spacing-md: 12px;
+  --pf-spacing-lg: 16px;
+  --pf-spacing-xl: 24px;
+  --pf-spacing-2xl: 32px;
+  --pf-spacing-3xl: 48px;
+  --pf-spacing-4xl: 64px;
+
+  /* Radius */
+  --pf-radius-sm: 8px;
+  --pf-radius-md: 12px;
+  --pf-radius-lg: 16px;
+  --pf-radius-xl: 20px;
+  --pf-radius-full: 100px;
+
+  /* Shadows */
+  --pf-shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
+  --pf-shadow-md: 0 4px 16px rgba(0,0,0,0.08);
+  --pf-shadow-lg: 0 16px 48px rgba(0,0,0,0.12);
+
+  /* Transitions */
+  --pf-transition-fast: 150ms ease;
+  --pf-transition-normal: 250ms ease;
+}
+
+[data-theme="dark"] {
+  --pf-color-surface-primary: #151A17;
+  --pf-color-surface-secondary: #1E2521;
+  --pf-color-surface-tertiary: #272F2A;
+  --pf-color-surface-hover: #2A332E;
+  --pf-color-surface-active: #313C36;
+  --pf-color-text-primary: #E8E4DF;
+  --pf-color-text-secondary: #A3AFA8;
+  --pf-color-text-muted: #6B7771;
+  --pf-color-accent-primary: #4ABA7A;
+  --pf-color-accent-hover: #5ECC8D;
+  --pf-color-accent-soft: #253A2E;
+  
+  --pf-color-border: #2A332E;
+  --pf-shadow-sm: 0 2px 8px rgba(0,0,0,0.4);
+  --pf-shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+  --pf-shadow-lg: 0 16px 48px rgba(0,0,0,0.6);
+}
+
+[data-theme="moss"] {
+  --pf-color-surface-primary: #F0F4F1;
+  --pf-color-surface-secondary: #FFFFFF;
+  --pf-color-surface-active: #E4ECE7;
+  --pf-color-accent-primary: #295F43;
+}
+
+[data-theme="peach"] {
+  --pf-color-surface-primary: #FFF5F2;
+  --pf-color-surface-secondary: #FFFFFF;
+  --pf-color-surface-active: #FFE4DC;
+  --pf-color-accent-primary: #E05C43;
+}
+
+[data-theme="cloud"] {
+  --pf-color-surface-primary: #F2F6FF;
+  --pf-color-surface-secondary: #FFFFFF;
+  --pf-color-surface-active: #E2EBFE;
+  --pf-color-accent-primary: #4A7AFA;
+}
+
+/* Base Resets & Global Styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--pf-font-body);
+  background-color: var(--pf-color-surface-primary);
+  color: var(--pf-color-text-primary);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* App shell handles scrolling inside */
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--pf-font-display);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+/* Utilities */
+.pf-heading { font-family: var(--pf-font-display); }
+.pf-body { font-family: var(--pf-font-body); }

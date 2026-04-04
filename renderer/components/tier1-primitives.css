@@ -1,0 +1,167 @@
+/* renderer/components/tier1-primitives.css */
+
+/* --- PFButton --- */
+.pf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pf-spacing-sm);
+  font-family: var(--pf-font-body);
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: all var(--pf-transition-fast);
+  text-decoration: none;
+}
+
+.pf-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pf-btn--primary {
+  background: var(--pf-color-accent-primary);
+  color: #fff;
+}
+.pf-btn--primary:hover:not(:disabled) {
+  background: var(--pf-color-accent-hover);
+}
+
+.pf-btn--secondary {
+  background: var(--pf-color-surface-secondary);
+  color: var(--pf-color-text-primary);
+  border: 1px solid var(--pf-color-border);
+}
+.pf-btn--secondary:hover:not(:disabled) {
+  background: var(--pf-color-surface-hover);
+}
+
+.pf-btn--ghost {
+  background: transparent;
+  color: var(--pf-color-text-secondary);
+}
+.pf-btn--ghost:hover:not(:disabled) {
+  background: var(--pf-color-surface-hover);
+  color: var(--pf-color-text-primary);
+}
+
+.pf-btn--danger {
+  background: var(--pf-color-danger);
+  color: #fff;
+}
+.pf-btn--danger:hover:not(:disabled) {
+  filter: brightness(0.9);
+}
+
+/* Button Sizes */
+.pf-btn--sm {
+  height: 32px;
+  padding: 0 var(--pf-spacing-md);
+  font-size: var(--pf-font-size-caption);
+  border-radius: var(--pf-radius-full);
+}
+
+.pf-btn--md {
+  height: 40px;
+  padding: 0 var(--pf-spacing-lg);
+  font-size: var(--pf-font-size-body);
+  border-radius: var(--pf-radius-full);
+}
+
+.pf-btn--icon {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: var(--pf-radius-full);
+}
+.pf-btn--icon.pf-btn--sm {
+  width: 32px;
+  height: 32px;
+}
+
+/* --- PFInput --- */
+.pf-input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-xs);
+  width: 100%;
+}
+
+.pf-input-label {
+  font-size: var(--pf-font-size-caption);
+  font-weight: 600;
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--pf-spacing-md);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-color-surface-secondary);
+  color: var(--pf-color-text-primary);
+  font-family: var(--pf-font-body);
+  font-size: var(--pf-font-size-body);
+  transition: border-color var(--pf-transition-fast);
+  outline: none;
+}
+.pf-input:focus {
+  border-color: var(--pf-color-accent-primary);
+}
+.pf-input:disabled {
+  background: var(--pf-color-surface-tertiary);
+  color: var(--pf-color-text-muted);
+  cursor: not-allowed;
+}
+
+/* --- PFBadge --- */
+.pf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--pf-radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  height: 20px;
+}
+
+.pf-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.pf-badge--default { background: var(--pf-color-surface-tertiary); color: var(--pf-color-text-secondary); }
+.pf-badge--default .pf-badge-dot { background: var(--pf-color-text-muted); }
+
+.pf-badge--success { background: rgba(46, 125, 50, 0.1); color: var(--pf-color-success); }
+.pf-badge--success .pf-badge-dot { background: var(--pf-color-success); }
+
+/* --- PFAvatar --- */
+.pf-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pf-color-surface-tertiary);
+  color: var(--pf-color-text-primary);
+  font-weight: 600;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+.pf-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.pf-avatar--sm { width: 24px; height: 24px; font-size: 10px; }
+.pf-avatar--md { width: 36px; height: 36px; font-size: 14px; }
+.pf-avatar--lg { width: 48px; height: 48px; font-size: 18px; }
+.pf-avatar--xl { width: 80px; height: 80px; font-size: 24px; }
+
+.pf-avatar--circle { border-radius: 50%; }
+.pf-avatar--square { border-radius: var(--pf-radius-sm); }

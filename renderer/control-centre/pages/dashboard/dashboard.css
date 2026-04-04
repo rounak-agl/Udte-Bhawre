@@ -1,0 +1,86 @@
+/* renderer/control-centre/pages/dashboard/dashboard.css */
+
+.pf-page-dashboard {
+  padding: var(--pf-spacing-4xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-xl);
+  height: 100%;
+  overflow-y: auto;
+}
+
+.pf-dashboard-header {
+  margin-bottom: var(--pf-spacing-md);
+}
+
+.pf-dashboard-greeting {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h1);
+  color: var(--pf-color-text-primary);
+  margin-bottom: var(--pf-spacing-xs);
+}
+
+.pf-dashboard-date {
+  color: var(--pf-color-text-secondary);
+  font-size: var(--pf-font-size-body);
+}
+
+.pf-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--pf-spacing-xl);
+}
+
+.pf-metric-value {
+  font-family: var(--pf-font-display);
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--pf-color-text-primary);
+  margin-bottom: var(--pf-spacing-xs);
+}
+
+.pf-metric-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--pf-font-size-caption);
+  font-weight: 600;
+  color: var(--pf-color-success);
+  background: rgba(46, 125, 50, 0.1);
+  padding: 2px 6px;
+  border-radius: var(--pf-radius-sm);
+}
+
+/* Activity item */
+.pf-activity-item {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-spacing-md);
+  padding: var(--pf-spacing-sm) 0;
+  border-bottom: 1px solid var(--pf-color-border);
+}
+.pf-activity-item:last-child {
+  border-bottom: none;
+}
+
+.pf-activity-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pf-color-surface-tertiary);
+  color: var(--pf-color-text-secondary);
+}
+
+.pf-activity-text {
+  flex: 1;
+  font-size: var(--pf-font-size-body);
+  color: var(--pf-color-text-primary);
+}
+
+.pf-activity-time {
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-muted);
+}
