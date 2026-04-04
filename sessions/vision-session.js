@@ -132,6 +132,20 @@ class VisionSession extends EventEmitter {
         ? [{ functionDeclarations }]
         : undefined;
 
+      // ── ArmorIQ: Create intent plan BEFORE tool execution ──
+      if (functionDeclarations.length > 0) {
+        try {
+          await this.mcpClient.createIntentPlan(message, functionDeclarations);
+        } catch (planErr) {
+          // Failure surfaces a clear UI message natively via the intent-failed event internally
+          this.emit('text', `\n\n🛡️ **ArmorIQ Security Intervention:** Intent planning failed — see security panel. (${planErr.message})\n`);
+          this.isBusy = false;
+          this.currentResponseText = '';
+          this.emit('turnComplete');
+          return; // Stop execution
+        }
+      }
+
       // Run the function calling loop
       await this._generateWithToolLoop(tools);
 
@@ -153,7 +167,7 @@ class VisionSession extends EventEmitter {
     } catch (err) {
       this.isBusy = false;
       this.currentResponseText = '';
-      
+
       console.error('[VisionSession] API Error:', err, err.message, err.status, JSON.stringify(err));
 
       if (err.message && err.message.includes('429')) {
@@ -225,6 +239,7 @@ class VisionSession extends EventEmitter {
 
       // Execute function calls and send results back
       const functionResponseParts = [];
+      let securityTerminated = false; // Circuit-breaker flag
 
       for (const call of functionCalls) {
         const toolName = call.name;
@@ -237,12 +252,22 @@ class VisionSession extends EventEmitter {
         this.emit('toolUse', toolName, toolArgs);
         this.history.push({ role: 'toolUse', text: `${toolName}(${argsSummary})` });
 
-        // Execute the tool
+        // Execute the tool (ArmorIQ validates inside executeToolCall)
         let result;
         try {
           result = await this.mcpClient.executeToolCall(toolName, toolArgs);
         } catch (err) {
           result = { success: false, error: err.message };
+        }
+
+        // ── CIRCUIT BREAKER: Security block → terminate turn immediately ──
+        if (result.securityBlock) {
+          this.emit('text', `\n\n🛡️ **Security Intervention:** The agent attempted an unauthorized action \`${toolName}\` and was blocked by ArmorIQ.\n> ${result.error}\n`);
+          this.emit('toolResult', result.error, true);
+          this.history.push({ role: 'toolResult', text: `SECURITY BLOCK: ${result.error}` });
+          console.log(`[VisionSession] 🛡️ CIRCUIT BREAKER: Terminated turn due to security block on ${toolName}`);
+          securityTerminated = true;
+          break; // Exit the inner for-loop immediately
         }
 
         // Emit tool result to UI
@@ -259,6 +284,11 @@ class VisionSession extends EventEmitter {
             response: result
           }
         });
+      }
+
+      // ── CIRCUIT BREAKER: If security terminated, exit the outer loop too ──
+      if (securityTerminated) {
+        return; // Exit _generateWithToolLoop() entirely — do NOT feed error back to LLM
       }
 
       // Add function responses to conversation for next iteration
@@ -293,6 +323,19 @@ class VisionSession extends EventEmitter {
         ? [{ functionDeclarations }]
         : undefined;
 
+      // ── ArmorIQ: Create intent plan BEFORE tool execution ──
+      if (functionDeclarations.length > 0) {
+        try {
+          await this.mcpClient.createIntentPlan(message, functionDeclarations);
+        } catch (planErr) {
+          this.emit('text', `\n\n🛡️ **ArmorIQ Security Intervention:** Intent planning failed — see security panel. (${planErr.message})\n`);
+          this.isBusy = false;
+          this.currentResponseText = '';
+          this.emit('turnComplete');
+          return;
+        }
+      }
+
       await this._generateWithToolLoop(tools);
 
       if (this.currentResponseText.trim()) {
@@ -316,7 +359,7 @@ class VisionSession extends EventEmitter {
     this.ai = null;
     this._conversationHistory = [];
     // Shutdown MCP client
-    this.mcpClient.shutdown().catch(() => {});
+    this.mcpClient.shutdown().catch(() => { });
   }
 
   /** Check streaming text for bounding box markers (real-time) */
@@ -334,7 +377,7 @@ class VisionSession extends EventEmitter {
       try {
         const stepData = JSON.parse(match[1].trim());
         let x, y, w, h;
-        
+
         if (Array.isArray(stepData.element) && stepData.element.length === 4) {
           // Native Gemini spatial format: [ymin, xmin, ymax, xmax] (0-1000 scale)
           const [ymin, xmin, ymax, xmax] = stepData.element;

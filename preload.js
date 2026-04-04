@@ -34,6 +34,10 @@ contextBridge.exposeInMainWorld('assistant', {
   copyLastResponse: () => ipcRenderer.send('copy-last-response'),
   getInitialState: () => ipcRenderer.invoke('get-initial-state'),
 
+  // Security telemetry (ArmorIQ)
+  onSecurityAuditEvent: (callback) => onChannel('security-audit-event', callback),
+  sendRendererReady: () => ipcRenderer.send('renderer-ready'),
+
   // Bubble
   onBubbleShow: (callback) => onChannel('bubble-show', callback),
   onBubbleHide: (callback) => onChannel('bubble-hide', callback),

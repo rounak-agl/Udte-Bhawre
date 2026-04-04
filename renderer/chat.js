@@ -158,6 +158,66 @@ function addToolMessage(text, isError = false) {
   scrollToBottom();
 }
 
+function addSecurityEvent(eventPayload) {
+  // Extract data
+  const type = eventPayload.type;
+  const data = eventPayload.data;
+  
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'message security-message';
+  msgDiv.style.borderRadius = '6px';
+  msgDiv.style.padding = '8px 12px';
+  msgDiv.style.marginTop = '6px';
+  msgDiv.style.marginBottom = '6px';
+  msgDiv.style.fontSize = '12px';
+  msgDiv.style.fontWeight = '500';
+  msgDiv.style.display = 'flex';
+  msgDiv.style.alignItems = 'flex-start';
+  msgDiv.style.gap = '8px';
+
+  let icon = '';
+  let bgColor = '';
+  let textColor = '#fff';
+  let messageContent = '';
+
+  switch (type) {
+    case 'intent-sealed':
+      icon = '🛡️';
+      bgColor = '#27AE60'; // Green
+      messageContent = `<div><strong>Intent Plan Sealed</strong><br><span style="opacity:0.8;font-size:11px;">Token: ${data.tokenHash}</span><br><span style="opacity:0.8;font-size:11px;">Authorized: [${data.authorizedTools.join(', ')}]</span></div>`;
+      break;
+    case 'tool-allowed':
+      icon = '✅';
+      bgColor = '#2980B9'; // Blue
+      messageContent = `Tool executed: ${data.tool}`;
+      break;
+    case 'enforcement-block':
+      if (data.reason.includes('drift')) {
+        icon = '⚠️';
+        bgColor = '#E67E22'; // Orange (INTENT_DRIFT)
+        messageContent = `Blocked: ${data.tool} not in signed intent plan`;
+      } else {
+        icon = '❌';
+        bgColor = '#C0392B'; // Red (POLICY_DENY)
+        messageContent = `Blocked: ${data.tool} matched deny list`;
+      }
+      break;
+    case 'intent-failed':
+      icon = '❌';
+      bgColor = '#C0392B'; // Red
+      messageContent = `Intent planning failed: ${data.reason}`;
+      break;
+  }
+
+  msgDiv.style.backgroundColor = bgColor;
+  msgDiv.style.color = textColor;
+  msgDiv.innerHTML = `<span style="font-size:16px;line-height:1;">${icon}</span><div style="flex:1;">${messageContent}</div>`;
+  
+  messagesEl.appendChild(msgDiv);
+  scrollToBottom();
+}
+
+
 function showTypingIndicator() {
   const existing = document.getElementById('typing-indicator');
   if (existing) return;
@@ -354,7 +414,18 @@ window.assistant.onApiKeyChange(() => {
   addMessage('system', '🔑 API Key updated. Session restarted.');
 });
 
-// Focus input on load
+// Focus input on load and notify Main that Renderer is ready for buffered events
 window.addEventListener('DOMContentLoaded', () => {
   inputField.focus();
+  if (window.assistant.sendRendererReady) {
+    window.assistant.sendRendererReady();
+  }
 });
+
+// Listen for security events
+if (window.assistant.onSecurityAuditEvent) {
+  window.assistant.onSecurityAuditEvent(eventPayload => {
+    addSecurityEvent(eventPayload);
+  });
+}
+

@@ -1,10 +1,15 @@
 const EventEmitter = require('events');
 const { getToolDeclarations, executeTool, isBuiltinTool } = require('../mcp-servers/builtin-tools');
+const { ArmorIQGuard, loadArmorIQConfig } = require('./armoriq-guard');
 
 /**
  * MCP Client Manager — routes tool calls between Gemini and tool providers.
  *
- * Currently supports:
+ * Now includes ArmorIQ security guard:
+ *   - Every tool call is validated against the signed intent token + local policy
+ *   - Blocked calls return { success: false, securityBlock: true } for circuit-breaking
+ *
+ * Supports:
  *   1. Built-in tools (in-process, zero config)
  *   2. External MCP servers via stdio (future — pluggable via config)
  */
@@ -14,14 +19,38 @@ class McpClientManager extends EventEmitter {
     this.initialized = false;
     this.externalClients = new Map(); // serverName → { client, transport, tools }
     this._approvalFn = null;
+    this.guard = null; // ArmorIQ security guard
   }
 
   /**
-   * Initialize the manager — connects to any configured external MCP servers.
+   * Initialize the manager — connects to any configured external MCP servers
+   * and initializes the ArmorIQ security guard.
    * @param {object} mcpServerConfigs - Config map: { serverName: { command, args, env } }
    */
   async initialize(mcpServerConfigs = {}) {
-    // Connect to external MCP servers (if any configured)
+    // ── Initialize ArmorIQ Guard ──────────────────────────
+    try {
+      const armorConfig = loadArmorIQConfig();
+      this.guard = new ArmorIQGuard(armorConfig);
+      const guardOk = await this.guard.initialize();
+
+      if (guardOk) {
+        // Forward guard events for UI consumption
+        this.guard.on('intent-created', (plan) => this.emit('security:intent-created', plan));
+        this.guard.on('intent-verified', (tool) => this.emit('security:intent-verified', tool));
+        this.guard.on('intent-blocked', (tool, reason) => this.emit('security:intent-blocked', tool, reason));
+        this.guard.on('policy-denied', (tool, reason) => this.emit('security:policy-denied', tool, reason));
+        this.guard.on('guard-error', (err) => this.emit('security:error', err));
+        console.log('[MCP] 🛡️  ArmorIQ Guard active');
+      } else {
+        console.warn('[MCP] ⚠️  ArmorIQ Guard inactive — running without security enforcement');
+      }
+    } catch (err) {
+      console.error('[MCP] ArmorIQ Guard init failed:', err.message);
+      this.guard = null;
+    }
+
+    // ── Connect external MCP servers ─────────────────────
     for (const [name, config] of Object.entries(mcpServerConfigs)) {
       try {
         await this._connectExternalServer(name, config);
@@ -43,6 +72,20 @@ class McpClientManager extends EventEmitter {
    */
   setApprovalFunction(fn) {
     this._approvalFn = fn;
+  }
+
+  /**
+   * Create an intent plan for the current user turn.
+   * Must be called BEFORE any tool execution in the turn.
+   * @param {string} prompt - The user's message
+   * @param {Array} tools - Available tool declarations
+   * @returns {object|null} The approved plan
+   */
+  async createIntentPlan(prompt, tools) {
+    if (this.guard && this.guard.enabled) {
+      return await this.guard.hooks.onLlmInput({ prompt, tools });
+    }
+    return null;
   }
 
   /**
@@ -68,12 +111,54 @@ class McpClientManager extends EventEmitter {
 
   /**
    * Execute a tool call by name with given arguments.
-   * Routes to the correct handler (built-in or external MCP server).
+   *
+   * ── SECURITY GATE ──
+   * If ArmorIQ guard is active, validates the tool call FIRST.
+   * On block, returns { success: false, securityBlock: true, error: reason }
+   * The calling code MUST check `securityBlock` and break the loop immediately.
+   *
    * @param {string} toolName
    * @param {object} args
    * @returns {Promise<object>} Tool result
    */
   async executeToolCall(toolName, args) {
+    console.log('[GATE] Tool attempted:', toolName);
+    
+    // ── ArmorIQ Security Gate ────────────────────────────
+    if (!this.guard || !this.guard.enabled) {
+      console.log('[GATE] Guard offline or missing — Fail closed');
+      // Fail closed
+      return { success: false, securityBlock: true, error: 'Security gate offline — all tools blocked.' };
+    }
+
+    try {
+      console.log('[GATE] Sending to tool validation:', toolName);
+      const validation = await this.guard.hooks.onToolExecution(toolName, args);
+      console.log('[GATE] Validation result:', validation);
+      if (!validation.allowed) {
+         return {
+           success: false,
+           securityBlock: true,
+           error: `🛡️ ArmorIQ BLOCKED: ${validation.reason}`,
+           toolName,
+         };
+      }
+      this.emit('security:tool-allowed', { tool: toolName, timestamp: Date.now() });
+    } catch (error) {
+      // Precise error code handling
+      if (error.code === 'POLICY_DENY') {
+        this.emit('security:enforcement-block', { tool: toolName, reason: 'Policy deny list match', rule: error.rule });
+        return { success: false, securityBlock: true, error: 'Blocked by policy: ' + toolName, toolName };
+      }
+      if (error.code === 'INTENT_DRIFT') {
+        this.emit('security:enforcement-block', { tool: toolName, reason: 'Tool not in signed intent plan' });
+        return { success: false, securityBlock: true, error: 'Blocked — intent drift detected', toolName };
+      }
+      throw error; // Real errors must surface
+    }
+
+    // ── Normal tool execution (passed security) ──────────
+
     // Check built-in tools first
     if (isBuiltinTool(toolName)) {
       this.emit('toolExecuting', toolName, args);
@@ -104,6 +189,13 @@ class McpClientManager extends EventEmitter {
     }
 
     return { success: false, error: `Unknown tool: ${toolName}` };
+  }
+
+  /**
+   * Get the guard's audit log for this session.
+   */
+  getSecurityAuditLog() {
+    return this.guard ? this.guard.getAuditLog() : [];
   }
 
   /**
@@ -200,7 +292,7 @@ class McpClientManager extends EventEmitter {
       // Recursively convert array items
       result.items = this._convertJsonSchemaToGemini(schema.items);
     }
-    
+
     if (schema.enum) {
       result.enum = schema.enum;
     }
@@ -228,9 +320,15 @@ class McpClientManager extends EventEmitter {
   }
 
   /**
-   * Gracefully disconnect all external MCP servers.
+   * Gracefully disconnect all external MCP servers and ArmorIQ guard.
    */
   async shutdown() {
+    // Shutdown ArmorIQ guard
+    if (this.guard) {
+      await this.guard.shutdown();
+      this.guard = null;
+    }
+
     for (const [name, serverInfo] of this.externalClients) {
       try {
         if (serverInfo.client) await serverInfo.client.close();

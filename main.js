@@ -7,6 +7,11 @@ if (process.platform === 'linux') {
 }
 
 const path = require('path');
+const { runBootstrap } = require('./sessions/bootstrap');
+
+// Run bootstrap before any agent classes or windows are initialized
+runBootstrap();
+
 const { getTaskbarGeometry, getCharacterY } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
 const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getToolsEnabled, setToolsEnabled, getMcpServers, setMcpServers } = require('./sessions/agent-session');
@@ -25,6 +30,18 @@ let characters = [];
 let onboardingDone = false;
 let overlayWindow = null;
 const screenCapture = new ScreenCapture({ maxBuffer: 3 });
+
+let pendingEvents = [];
+let rendererReady = false;
+
+function emitSecurityEventToUI(type, data, charWindowOrMain) {
+  const event = { type, data, ts: Date.now() };
+  if (rendererReady && charWindowOrMain && !charWindowOrMain.isDestroyed()) {
+    charWindowOrMain.webContents.send('security-audit-event', event);
+  } else {
+    pendingEvents.push(event);
+  }
+}
 
 // Thinking bubble phrases
 const THINKING_PHRASES = [
@@ -254,6 +271,12 @@ class Character {
         this.chatWindow.webContents.send('chat-tool-result', summary, isError);
       }
     });
+
+    // ── Security events (ArmorIQ) ──
+    this.session.on('security:intent-sealed', (data) => emitSecurityEventToUI('intent-sealed', data, this.chatWindow));
+    this.session.on('security:intent-failed', (data) => emitSecurityEventToUI('intent-failed', data, this.chatWindow));
+    this.session.on('security:tool-allowed', (data) => emitSecurityEventToUI('tool-allowed', data, this.chatWindow));
+    this.session.on('security:enforcement-block', (data) => emitSecurityEventToUI('enforcement-block', data, this.chatWindow));
 
     this.session.on('sessionReady', () => {
       if (this.chatWindow && !this.chatWindow.isDestroyed()) {
@@ -848,6 +871,13 @@ ipcMain.on('character-clicked', (event) => {
     }
     clickedChar.createChatWindow();
   }
+});
+
+ipcMain.on('renderer-ready', (event) => {
+  rendererReady = true;
+  const webContents = event.sender;
+  pendingEvents.forEach(e => webContents.send('security-audit-event', e));
+  pendingEvents = [];
 });
 
 ipcMain.on('chat-send', (event, message) => {
