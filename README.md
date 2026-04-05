@@ -3,6 +3,11 @@
 Tiny AI companions that live on your taskbar, a cross-platform Electron-based desktop assistant. Featuring multi-terminal management, MCP-powered tool integration, and customizable AI personalities that interact with you directly from your system dock.
 
 ---
+## Demo Videos
+
+https://drive.google.com/drive/folders/1wan_MBSY5Zrw-2k5OIenmlNfSRAtgpsf?usp=drive_link
+
+---
 
 ## 🛠 Prerequisites
 
