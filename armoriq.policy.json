@@ -1,0 +1,7 @@
+{
+  "agentId": "antigravity-agent-001",
+  "allow": [],
+  "deny": [
+    "upload_external"
+  ]
+}

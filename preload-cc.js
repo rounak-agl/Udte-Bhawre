@@ -14,7 +14,6 @@ contextBridge.exposeInMainWorld('ccBridge', {
   setProvider: (provider) => ipcRenderer.send('set-provider', provider),
   setTheme: (theme) => ipcRenderer.send('set-theme', theme),
   onProviderChange: (cb) => ipcRenderer.on('provider-change', (_, provider) => cb(provider)),
-  onProviderChange: (cb) => ipcRenderer.on('provider-change', (_, provider) => cb(provider)),
   onThemeChange: (cb) => ipcRenderer.on('theme-change', (_, theme) => cb(theme)),
   onNavigate: (cb) => ipcRenderer.on('cc:navigate', (_, page) => cb(page)),
 
@@ -35,9 +34,4 @@ contextBridge.exposeInMainWorld('ccBridge', {
   sendMessage: (sessionId, text) => ipcRenderer.send('cc:send-message', sessionId, text),
   onChatText: (cb) => ipcRenderer.on('cc:chat-text', (_, sessionId, text) => cb(sessionId, text)),
   onChatTurnComplete: (cb) => ipcRenderer.on('cc:chat-turn-complete', (_, sessionId) => cb(sessionId)),
-
-  // ── CC Window Controls ──
-  minimizeWindow: () => ipcRenderer.send('cc:minimize'),
-  maximizeWindow: () => ipcRenderer.send('cc:maximize'),
-  closeWindow: () => ipcRenderer.send('cc:close'),
 });

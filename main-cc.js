@@ -1,7 +1,9 @@
-const { BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-
 let ccWindow = null;
+let isQuitting = false;
+
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+app.on('before-quit', () => isQuitting = true);
 
 /**
  * Init CC IPC — ONLY registers cc: prefixed handlers.
@@ -10,15 +12,7 @@ let ccWindow = null;
  * already live in main.js. The CC preload reuses them directly.
  */
 function initControlCentre({ characters }) {
-  // Window controls
-  ipcMain.on('cc:minimize', () => ccWindow?.minimize());
-  ipcMain.on('cc:maximize', () => {
-    if (ccWindow?.isMaximized()) ccWindow.unmaximize();
-    else ccWindow?.maximize();
-  });
-  ipcMain.on('cc:close', () => {
-    if (ccWindow) ccWindow.hide();
-  });
+  // Window controls are now handled natively by Electron titleBarOverlay
 
   // Launch an agent from the CC (reuses same logic as dashboard)
   ipcMain.on('cc:launch-agent', (event, agentObj) => {
@@ -109,8 +103,10 @@ function openControlCentre(page = 'dashboard') {
   });
   
   ccWindow.on('close', (e) => {
-    e.preventDefault();
-    ccWindow.hide();
+    if (!isQuitting) {
+      e.preventDefault();
+      ccWindow.hide();
+    }
   });
 }
 

@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('assistant', {
   requestPosition: () => ipcRenderer.send('request-position'),
 
   // Chat
+  minimizeChat: () => ipcRenderer.send('chat-minimize'),
+  setTheme: (theme) => ipcRenderer.send('set-theme', theme),
   sendMessage: (msg) => ipcRenderer.send('chat-send', msg),
   onChatText: (callback) => onChannel('chat-text', callback),
   onChatError: (callback) => onChannel('chat-error', callback),
@@ -70,13 +72,4 @@ contextBridge.exposeInMainWorld('assistant', {
   // MCP Servers
   getMcpServers: () => ipcRenderer.invoke('get-mcp-servers'),
   setMcpServers: (servers) => ipcRenderer.send('set-mcp-servers', servers),
-});
-
-contextBridge.exposeInMainWorld('electron', {
-  getAgents: () => ipcRenderer.invoke('get-agents'),
-  saveAgent: (config) => ipcRenderer.invoke('save-agent', config),
-  launchAgent: (agent) => ipcRenderer.send('launch-agent', agent),
-  getHistory: () => ipcRenderer.invoke('get-history'),
-  chooseContextFile: () => ipcRenderer.invoke('choose-context-file'),
-  onHistoryUpdated: (callback) => onChannel('history-updated', callback),
 });

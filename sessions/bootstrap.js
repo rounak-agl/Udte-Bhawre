@@ -4,9 +4,10 @@ const os = require('os');
 const assert = require('assert');
 
 function runBootstrap() {
+  const projectRoot = path.join(__dirname, '..');
   const configDir = path.join(os.homedir(), '.openclaw');
   const openclawConfigPath = path.join(configDir, 'openclaw.json');
-  const policyPath = path.join(configDir, 'antigravity.policy.json');
+  const policyPath = path.join(projectRoot, 'armoriq.policy.json');
 
   // Ensure directory exists
   if (!fs.existsSync(configDir)) {
@@ -36,11 +37,11 @@ function runBootstrap() {
   if (!fs.existsSync(policyPath)) {
     const defaultPolicy = {
       agentId: "antigravity-agent-001",
-      allow: ["read_file", "write_file", "web_search", "get_weather"],
-      deny: ["bash_execute", "delete_file", "upload_external"]
+      allow: [],
+      deny: ["upload_external"]
     };
     fs.writeFileSync(policyPath, JSON.stringify(defaultPolicy, null, 2), 'utf8');
-    console.log('[Bootstrap] Wrote default antigravity.policy.json');
+    console.log('[Bootstrap] Wrote default armoriq.policy.json');
   }
 
   // 3. Immediately read back and validate JSON and keys (boot-time validation)
@@ -48,6 +49,14 @@ function runBootstrap() {
     const loadedConfig = JSON.parse(fs.readFileSync(openclawConfigPath, 'utf8'));
     const armorclawConfig = loadedConfig.plugins?.entries?.armorclaw?.config;
     assert(armorclawConfig, 'armorclaw plugin configuration missing from openclaw.json');
+    
+    // Force synchronize the policyStorePath to ensure it points to the local workspace
+    if (armorclawConfig.policyStorePath !== policyPath) {
+      armorclawConfig.policyStorePath = policyPath;
+      fs.writeFileSync(openclawConfigPath, JSON.stringify(loadedConfig, null, 2), 'utf8');
+      console.log('[Bootstrap] Synced policyStorePath in openclaw.json to local workspace');
+    }
+
     assert(armorclawConfig.policyStorePath, 'policyStorePath missing from openclaw.json config');
     assert(armorclawConfig.agentId, 'agentId missing from openclaw.json config');
 

@@ -30,7 +30,7 @@ let tray = null;
 let characters = [];
 let onboardingDone = false;
 let overlayWindow = null;
-let dashboardWindow = null;
+let isQuitting = false;
 const screenCapture = new ScreenCapture({ maxBuffer: 3 });
 
 let pendingEvents = [];
@@ -169,9 +169,9 @@ class Character {
       });
     });
 
-    // Prevent closing (unless intentionally destroying)
+    // Prevent closing (unless intentionally destroying or quitting)
     this.charWindow.on('close', (e) => {
-      if (!this._destroying) {
+      if (!this._destroying && !isQuitting) {
         e.preventDefault();
         this.charWindow.hide();
       }
@@ -341,7 +341,14 @@ class Character {
     if (this.systemPromptFile) {
       try {
         const fs = require('fs');
-        const contextData = fs.readFileSync(this.systemPromptFile, 'utf-8');
+          const os = require('os');
+          let actualPromptPath = this.systemPromptFile;
+          if (actualPromptPath.startsWith('~/') || actualPromptPath.startsWith('~\\')) {
+            actualPromptPath = path.join(os.homedir(), actualPromptPath.slice(2));
+          } else if (actualPromptPath === '~') {
+            actualPromptPath = os.homedir();
+          }
+          const contextData = fs.readFileSync(actualPromptPath, 'utf-8');
         if (contextData) {
           // Send a hidden system injected prompt or just feed it as part of history.
           // Since there is no explicit setSystemPrompt on generic sessions yet,
@@ -626,9 +633,9 @@ class Character {
           updatedAt: new Date()
         });
       }
-      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-        dashboardWindow.webContents.send('history-updated');
-      }
+      BrowserWindow.getAllWindows().forEach(w => {
+        if (!w.isDestroyed()) w.webContents.send('history-updated');
+      });
     } catch(e) {
       console.error('[DB] Failed to save history:', e.message);
     }
@@ -672,6 +679,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  isQuitting = true;
   // Stop screen capture and clear ALL screenshots
   screenCapture.stop();
   characters.forEach(c => c.destroy());
@@ -682,7 +690,7 @@ app.on('before-quit', () => {
 //  System Tray
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function setupTray() {
-  const iconPath = path.join(__dirname, 'assets', 'icon.png');
+  const iconPath = path.join(__dirname, 'assets', 'q.png');
   const icon = nativeImage.createFromPath(iconPath);
 
   tray = new Tray(icon.resize({ width: 16, height: 16 }));
@@ -780,29 +788,11 @@ function rebuildTrayMenu() {
     {
       label: 'Manage MCP Servers...',
       click: () => {
-        const settingsWin = new BrowserWindow({
-          width: 560,
-          height: 700,
-          title: 'MCP Integrations',
-          autoHideMenuBar: true,
-          backgroundColor: '#0d0d12',
-          webPreferences: {
-            preload: path.join(__dirname, 'preload.js'),
-            contextIsolation: true,
-            nodeIntegration: false
-          }
-        });
-        settingsWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
+        openControlCentre('connectors');
       }
     },
     {
       label: 'Set ElevenLabs API Key...',
-      click: () => {
-        promptForElevenLabsApiKey();
-      }
-    },
-    {
-      label: 'Set ElevenLabs Key...',
       click: () => {
         openControlCentre('settings');
       }
@@ -821,7 +811,7 @@ function rebuildTrayMenu() {
       }
     },
     {
-      label: 'Set API Key...',
+      label: 'Settings',
       click: () => {
         openControlCentre('settings');
       }
@@ -847,128 +837,6 @@ function rebuildTrayMenu() {
   tray.setContextMenu(menu);
 }
 
-function promptForApiKey() {
-  // Simple input dialog using a tiny BrowserWindow
-  const inputWin = new BrowserWindow({
-    width: 450,
-    height: 180,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    alwaysOnTop: true,
-    title: 'Set Gemini API Key',
-    webPreferences: { nodeIntegration: false, contextIsolation: true }
-  });
-
-  const currentKey = getApiKey();
-  const maskedKey = currentKey ? currentKey.substring(0, 8) + '...' : '';
-
-  const htmlContent = `
-    <html><body style="font-family:Segoe UI,sans-serif;padding:20px;background:#1a1a2e;color:#fff">
-    <h3 style="margin:0 0 10px">Gemini API Key</h3>
-    <p style="font-size:12px;color:#aaa;margin:0 0 10px">Get one free at <a href="https://aistudio.google.com/apikey" style="color:#00d4aa">aistudio.google.com</a></p>
-    <input id="key" type="text" placeholder="${maskedKey || 'Paste your API key here'}" 
-      style="width:100%;padding:8px 12px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;font-size:14px;outline:none" autofocus>
-    <div style="margin-top:12px;text-align:right">
-      <button onclick="window.close()" style="padding:6px 16px;border:1px solid #444;border-radius:6px;background:transparent;color:#aaa;cursor:pointer;margin-right:8px">Cancel</button>
-      <button onclick="save()" style="padding:6px 16px;border:none;border-radius:6px;background:#00d4aa;color:#000;font-weight:600;cursor:pointer">Save</button>
-    </div>
-    <script>
-      function save() {
-        const key = document.getElementById('key').value.trim();
-        if (key) {
-          document.title = 'APIKEY:' + key;
-          // Don't close immediately — let the title change event fire first.
-          // The main process will close this window after processing the key.
-        } else {
-          window.close();
-        }
-      }
-      document.getElementById('key').addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
-    </script>
-    </body></html>
-  `;
-  inputWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
-
-  inputWin.on('page-title-updated', (e, title) => {
-    if (title.startsWith('APIKEY:')) {
-      const key = title.substring(7);
-      setApiKey(key);
-      console.log('[API Key] Updated. Recreating all sessions with new key.');
-
-      // Terminate old sessions and immediately recreate with the new key
-      characters.forEach(c => {
-        if (c.session) {
-          c.session.terminate();
-          c.session.removeAllListeners();
-          c.session = null;
-        }
-        if (c.chatWindow && !c.chatWindow.isDestroyed()) {
-          c.chatWindow.webContents.send('api-key-changed');
-        }
-        // Immediately recreate the session so the new key is active
-        c.createSession();
-      });
-
-      // Close the input dialog from the main process (safe — title event already fired)
-      if (!inputWin.isDestroyed()) {
-        inputWin.destroy();
-      }
-    }
-  });
-}
-
-function promptForElevenLabsApiKey() {
-  const inputWin = new BrowserWindow({
-    width: 450,
-    height: 180,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    alwaysOnTop: true,
-    title: 'Set ElevenLabs API Key',
-    webPreferences: { nodeIntegration: false, contextIsolation: true }
-  });
-
-  const currentKey = getElevenLabsApiKey();
-  const maskedKey = currentKey ? currentKey.substring(0, 8) + '...' : '';
-
-  const htmlContent = `
-    <html><body style="font-family:Segoe UI,sans-serif;padding:20px;background:#1a1a2e;color:#fff">
-    <h3 style="margin:0 0 10px">ElevenLabs API Key</h3>
-    <p style="font-size:12px;color:#aaa;margin:0 0 10px">Get one at <a href="https://elevenlabs.io" style="color:#00d4aa">elevenlabs.io</a></p>
-    <input id="key" type="text" placeholder="\${maskedKey || 'Paste your ElevenLabs API key here'}" 
-      style="width:100%;padding:8px 12px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;font-size:14px;outline:none" autofocus>
-    <div style="margin-top:12px;text-align:right">
-      <button onclick="window.close()" style="padding:6px 16px;border:1px solid #444;border-radius:6px;background:transparent;color:#aaa;cursor:pointer;margin-right:8px">Cancel</button>
-      <button onclick="save()" style="padding:6px 16px;border:none;border-radius:6px;background:#00d4aa;color:#000;font-weight:600;cursor:pointer">Save</button>
-    </div>
-    <script>
-      function save() {
-        const key = document.getElementById('key').value.trim();
-        if (key) {
-          document.title = 'ELEVENLABS_APIKEY:' + key;
-        } else {
-          window.close();
-        }
-      }
-      document.getElementById('key').addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
-    </script>
-    </body></html>
-  `;
-  inputWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
-
-  inputWin.on('page-title-updated', (e, title) => {
-    if (title.startsWith('ELEVENLABS_APIKEY:')) {
-      const key = title.substring(18);
-      setElevenLabsApiKey(key);
-      console.log('[ElevenLabs API Key] Updated.');
-      if (!inputWin.isDestroyed()) {
-        inputWin.destroy();
-      }
-    }
-  });
-}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  Update Loop (replaces CVDisplayLink)
@@ -1012,6 +880,15 @@ ipcMain.on('renderer-ready', (event) => {
   const webContents = event.sender;
   pendingEvents.forEach(e => webContents.send('security-audit-event', e));
   pendingEvents = [];
+});
+
+ipcMain.on('chat-minimize', (event) => {
+  const char = characters.find(c =>
+    c.chatWindow && !c.chatWindow.isDestroyed() && c.chatWindow.webContents === event.sender
+  );
+  if (char && char.chatWindow && !char.chatWindow.isDestroyed()) {
+    char.chatWindow.hide();
+  }
 });
 
 ipcMain.on('chat-send', (event, message) => {
@@ -1274,33 +1151,6 @@ function hideOverlay() {
   if (stepPanelWindow && !stepPanelWindow.isDestroyed()) stepPanelWindow.hide();
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-//  Dashboard
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function createDashboardWindow() {
-  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
-    dashboardWindow.show();
-    return;
-  }
-  
-  dashboardWindow = new BrowserWindow({
-    width: 1024,
-    height: 768,
-    title: 'Nexus Dashboard',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false
-    }
-  });
-  
-  dashboardWindow.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'));
-  
-  dashboardWindow.on('closed', () => {
-    dashboardWindow = null;
-  });
-}
-
 // ── Dashboard / MongoDB IPC ──
 ipcMain.handle('get-agents', async () => {
   if (!isDBConnected()) return [];
@@ -1483,58 +1333,6 @@ ipcMain.handle('delete-agent', async (event, id) => {
     return false;
   }
 });
-
-
-
-function promptForApiKeyInput(titleText, linkText, prefix, onSave) {
-  const inputWin = new BrowserWindow({
-    width: 450,
-    height: 180,
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    alwaysOnTop: true,
-    title: `Set ${titleText}`,
-    webPreferences: { nodeIntegration: false, contextIsolation: true }
-  });
-
-  const htmlContent = `
-    <html><body style="font-family:Segoe UI,sans-serif;padding:20px;background:#1a1a2e;color:#fff">
-    <h3 style="margin:0 0 10px">${titleText}</h3>
-    <p style="font-size:12px;color:#aaa;margin:0 0 10px">Get one at <a href="https://${linkText}" style="color:#00d4aa">${linkText}</a></p>
-    <input id="key" type="text" placeholder="Paste your ${titleText} here" 
-      style="width:100%;padding:8px 12px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;font-size:14px;outline:none" autofocus>
-    <div style="margin-top:12px;text-align:right">
-      <button onclick="window.close()" style="padding:6px 16px;border:1px solid #444;border-radius:6px;background:transparent;color:#aaa;cursor:pointer;margin-right:8px">Cancel</button>
-      <button onclick="save()" style="padding:6px 16px;border:none;border-radius:6px;background:#00d4aa;color:#000;font-weight:600;cursor:pointer">Save</button>
-    </div>
-    <script>
-      function save() {
-        const key = document.getElementById('key').value.trim();
-        if (key) {
-          document.title = '${prefix}' + key;
-        } else {
-          window.close();
-        }
-      }
-      document.getElementById('key').addEventListener('keydown', e => { if (e.key === 'Enter') save(); });
-    </script>
-    </body></html>
-  `;
-  inputWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(htmlContent));
-
-  inputWin.on('page-title-updated', (e, title) => {
-    if (title.startsWith(prefix)) {
-      const key = title.substring(prefix.length);
-      onSave(key);
-      console.log(`[${titleText}] Updated.`);
-      if (!inputWin.isDestroyed()) {
-        inputWin.destroy();
-      }
-    }
-  });
-}
-
 
 module.exports = { 
   launchAgentInstance, 

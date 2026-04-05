@@ -34,7 +34,7 @@ const DEFAULT_CONFIG = {
   proxyEndpoint: 'https://customer-proxy.armoriq.ai',
   backendEndpoint: 'https://customer-api.armoriq.ai',
   validitySeconds: 300,
-  policyPath: path.join(os.homedir(), '.openclaw', 'armoriq.policy.json'),
+  policyPath: path.join(__dirname, '..', 'armoriq.policy.json'),
 };
 
 class ArmorIQGuard extends EventEmitter {
@@ -53,7 +53,7 @@ class ArmorIQGuard extends EventEmitter {
     this.enabled = false;
     this.enabled = false;
     this._sdkLoaded = false;
-    
+
     // Expose hook APIs matching standard SDK
     this.hooks = {
       onLlmInput: this.onLlmInput.bind(this),
@@ -189,13 +189,10 @@ class ArmorIQGuard extends EventEmitter {
     }
 
     try {
-      // Demo Heuristic: Extract intended tools by analyzing prompt keywords
-      const promptLower = prompt.toLowerCase();
-      const intendedTools = tools.filter(tool => {
-        const keywords = tool.name.toLowerCase().split('_');
-        // If any keyword of the tool natively exists in the prompt, assume intent
-        return keywords.some(kw => promptLower.includes(kw));
-      });
+      // Include all available tools in the intent plan.
+      // Security enforcement is handled by the policy deny list and argument
+      // pattern blocking — the intent plan should not be the bottleneck.
+      const intendedTools = tools;
 
       // Build a plan object from the intended tools
       const plan = {
@@ -302,7 +299,7 @@ class ArmorIQGuard extends EventEmitter {
       });
       this.emit('policy-denied', toolName, policyErr.message);
       console.log(`[ArmorIQ] ❌ POLICY DENIED: ${toolName} — ${policyErr.message}`);
-      
+
       // Re-throw so gate handles properly
       throw Object.assign(new Error(policyErr.message), { code: 'POLICY_DENY', rule: policyErr.message });
     }
@@ -342,7 +339,7 @@ class ArmorIQGuard extends EventEmitter {
       });
       this.emit('intent-blocked', toolName, reason);
       console.log(`[ArmorIQ] ❌ INTENT DRIFT BLOCKED: ${toolName} — ${reason}`);
-      
+
       throw Object.assign(new Error(reason), { code: 'INTENT_DRIFT' });
     }
 
@@ -390,7 +387,7 @@ class ArmorIQGuard extends EventEmitter {
       if (isHardBlock) {
         this.emit(err.code === 'POLICY_DENY' ? 'policy-denied' : 'intent-blocked', toolName, reason);
         console.log(`[ArmorIQ] ❌ VERIFICATION BLOCKED: ${toolName} — ${reason}`);
-        
+
         // RE-THROW to be caught by specific execution gate checks
         throw Object.assign(new Error(reason), { code: err.code, rule: policyResult?.reason || '' });
       }
@@ -429,11 +426,16 @@ class ArmorIQGuard extends EventEmitter {
     // 2. Argument-Level Pattern Blocking (Precision Enforcement)
     // We inspect common fields like 'command', 'path', 'script' for dangerous strings.
     const dangerousStrings = [
-      'rm -rf', 'sudo', 'chmod', '/etc/shadow', '/root', '.bash_history', 
-      ' > /dev/null', 'powershell', 'cmd /c', '.env'
+      'rm -r', 'rm -f', 'sudo', 'chmod', 'chown',
+      '/etc/shadow', '/etc/passwd', '/root', '.bash_history',
+      ' > /dev/null', 'powershell', 'cmd /c', '.env',
+      'mkfs', 'dd if=', 'shutdown', 'reboot',
+      ':(){', 'fork bomb', '| sh', '| bash',
+      'curl | ', 'wget | ', '> /dev/sda',
+      'kill -9', 'killall', 'pkill'
     ];
     const argValues = Object.values(args).join(' ').toLowerCase();
-    
+
     for (const pattern of dangerousStrings) {
       if (argValues.includes(pattern)) {
         const err = new Error(`Security Block: Prohibited pattern "${pattern}" detected in arguments.`);
@@ -545,14 +547,14 @@ function loadArmorIQConfig() {
     const parsed = JSON.parse(raw);
     const pluginConfig = parsed.plugins?.entries?.armorclaw?.config || {};
     return {
-      apiKey:process.env.ARMORIQ_API_KEY || pluginConfig.apiKey || '',
+      apiKey: process.env.ARMORIQ_API_KEY || pluginConfig.apiKey || '',
       userId: pluginConfig.userId || 'default-user',
       agentId: pluginConfig.agentId || 'openclaw-agent-001',
       contextId: pluginConfig.contextId || 'default',
       iapEndpoint: pluginConfig.iapEndpoint,
       proxyEndpoint: pluginConfig.proxyEndpoint,
       backendEndpoint: pluginConfig.backendEndpoint,
-      policyPath: pluginConfig.policyStorePath || path.join(os.homedir(), '.openclaw', 'armoriq.policy.json'),
+      policyPath: pluginConfig.policyStorePath || path.join(__dirname, '..', 'armoriq.policy.json'),
     };
   } catch (err) {
     console.error('[ArmorIQ] Failed to load openclaw config:', err.message);

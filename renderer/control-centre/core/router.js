@@ -37,10 +37,11 @@ class PFRouter {
         const params = match.groups || {};
         this.renderPage(route, params);
         
-        // Update sidebar
+        // Update sidebar active state
+        const pageId = route.path.split('/')[1];
         document.querySelectorAll('.pf-sidebar-item').forEach(el => {
           el.classList.remove('active');
-          if (el.getAttribute('href') === `#${route.path.split('/')[1]}`) {
+          if (el.dataset.navId === pageId) {
             el.classList.add('active');
           }
         });

@@ -4,13 +4,14 @@ function PFSidebar({ appName = 'Astrophage', items = [], activeId, onNavigate })
   const sidebar = pfCreateElement('nav', 'pf-sidebar');
   
   const header = pfCreateElement('div', 'pf-sidebar-header');
-  header.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg> <span>${appName}</span>`;
+  header.innerHTML = `<img src="../../assets/q.svg" width="24" height="24" alt="logo" style="object-fit: contain;" /> <span>${appName}</span>`;
   sidebar.appendChild(header);
 
   const nav = pfCreateElement('div', 'pf-sidebar-nav');
   
   items.forEach(item => {
     const el = pfCreateElement('a', `pf-sidebar-item ${item.id === activeId ? 'active' : ''}`);
+    el.dataset.navId = item.id;
     
     if (item.icon) {
       el.appendChild(pfCreateElement('span', 'pf-sidebar-icon', { innerHTML: item.icon }));
@@ -41,21 +42,7 @@ function PFTopBar({ title = '', actions = [] }) {
   const right = pfCreateElement('div', 'pf-topbar-right');
   const controls = pfCreateElement('div', 'pf-titlebar-controls');
   
-  // Custom Window Controls for frameless window
-  if (window.ccBridge) {
-    const minBtn = pfCreateElement('button', 'pf-topbar-btn', { innerHTML: '—' });
-    minBtn.onclick = () => window.ccBridge.minimizeWindow();
-    controls.appendChild(minBtn);
-    
-    const maxBtn = pfCreateElement('button', 'pf-topbar-btn', { innerHTML: '□' });
-    maxBtn.onclick = () => window.ccBridge.maximizeWindow();
-    controls.appendChild(maxBtn);
-    
-    const closeBtn = pfCreateElement('button', 'pf-topbar-btn', { innerHTML: '✕' });
-    closeBtn.onclick = () => window.ccBridge.closeWindow();
-    controls.appendChild(closeBtn);
-  }
-  
+  // Custom window controls are handled natively by Electron's titleBarOverlay  
   right.appendChild(controls);
   topbar.appendChild(right);
   

@@ -91,15 +91,9 @@ async function boot() {
   // Initialize Toast System
   if (window.PFToast) PFToast.init();
 
-  // Initialize Palette & Global Shortcuts
+  // Initialize Palette (keyboard shortcuts handled internally by command-palette.js)
   if (window.commandPalette) {
     window.commandPalette.init();
-    window.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        window.commandPalette.open();
-      }
-    });
   }
 
   console.log('[CC Boot] Control Centre loaded successfully');

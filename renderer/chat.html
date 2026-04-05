@@ -8,15 +8,36 @@
   <div id="chat-container" class="theme-peach">
     <!-- Title bar -->
     <div id="title-bar">
-      <span id="title-text">Claude</span>
+      <div id="title-left">
+        <!-- Status indicator (like equalizer icon in reference) -->
+        <button id="btn-status" class="title-btn" title="Session status">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="3" y="14" width="3" height="7" rx="1"/>
+            <rect x="8" y="10" width="3" height="11" rx="1"/>
+            <rect x="13" y="6" width="3" height="15" rx="1"/>
+            <rect x="18" y="3" width="3" height="18" rx="1"/>
+          </svg>
+        </button>
+        <!-- Provider settings -->
+        <button id="btn-settings" class="title-btn" title="Settings">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
       <div id="title-actions">
-        <button id="btn-copy" title="Copy last response">
+        <button id="btn-minimize" class="title-btn" title="Minimize">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>
+        <button id="btn-copy" class="title-btn" title="Copy last response">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
             <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
           </svg>
         </button>
-        <button id="btn-close" title="Close">
+        <button id="btn-close" class="title-btn" title="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
@@ -24,34 +45,52 @@
       </div>
     </div>
 
-    <!-- Separator -->
-    <div id="separator"></div>
-
-    <!-- Messages area -->
-    <div id="messages">
-      <div id="welcome-message" class="message system-message">
-        <div class="message-content">
-          <span class="welcome-emoji">👋</span> Hi! I'm your desktop assistant. Ask me anything, or type <code>/help</code> for commands.
+    <!-- Main content area -->
+    <div id="main-content">
+      <!-- Welcome / Provider card (visible when no messages) -->
+      <div id="provider-card">
+        <div id="provider-card-icon">
+          <span id="provider-card-emoji">✦</span>
         </div>
+        <div id="provider-card-info">
+          <div id="provider-card-title">Desktop Assistant</div>
+          <div id="provider-card-sub">Ask anything, get instant help</div>
+        </div>
+        <button id="provider-card-action">/help</button>
+      </div>
+
+      <!-- Messages area -->
+      <div id="messages">
+        <div id="messages-header">Recent Activity</div>
       </div>
     </div>
 
-    <!-- Input area -->
-    <div id="input-area">
-      <input type="text" id="input-field" placeholder="Ask Claude..." autocomplete="off" spellcheck="false">
-      <button id="btn-mic" title="Hold Space or Click to speak">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-          <line x1="12" y1="19" x2="12" y2="23"></line>
-          <line x1="8" y1="23" x2="16" y2="23"></line>
-        </svg>
-      </button>
-      <button id="btn-send" title="Send">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-        </svg>
-      </button>
+    <!-- Bottom bar: provider indicator + input -->
+    <div id="bottom-section">
+      <div id="provider-bar">
+        <div id="provider-indicator">
+          <span id="provider-dot"></span>
+          <span id="provider-name">Claude</span>
+        </div>
+        <span id="session-status">Ready</span>
+      </div>
+      <div id="input-area">
+        <textarea id="input-field" placeholder="Ask Claude anything..." autocomplete="off" spellcheck="false" rows="1"></textarea>
+        <button id="btn-mic" title="Hold Space or Click to speak">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+          </svg>
+        </button>
+        <button id="btn-send" title="Send">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+            <polyline points="12 5 19 12 12 19"></polyline>
+          </svg>
+        </button>
+      </div>
     </div>
   </div>
   <script src="control-centre/core/markdown.js"></script>

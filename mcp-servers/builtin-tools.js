@@ -4,6 +4,116 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 
+// --- File System Security & Fuzzy Matching Helpers ---
+
+/**
+ * Expands ~ at the start of a path to the user's home directory.
+ * Node.js path module does NOT do this automatically (unlike a shell).
+ */
+function expandTilde(p) {
+  if (!p) return p;
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) {
+    return path.join(os.homedir(), p.slice(2));
+  }
+  return p;
+}
+
+/**
+ * Checks if the path is permitted (Blocked from C: drive)
+ */
+function isSafePath(targetPath) {
+  const absPath = path.resolve(targetPath);
+  const driveLetter = path.parse(absPath).root.toLowerCase();
+  // Ensure that no drive starting with 'c:' is accessed
+  if (driveLetter.startsWith('c:')) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Basic Levenshtein distance for fuzzy file matching
+ */
+function getLevenshteinDistance(a, b) {
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1,
+          Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+/**
+ * Fuzzy search in a directory to find the closest matching file.
+ */
+function fuzzyFindFile(targetDir, targetBasename) {
+  try {
+    if (!fs.existsSync(targetDir)) return null;
+    
+    // Check if the directory itself is allowed before scanning it!
+    if (!isSafePath(targetDir)) return null;
+
+    const entries = fs.readdirSync(targetDir);
+    let bestMatch = null;
+    let bestDistance = Infinity;
+
+    for (const entry of entries) {
+      const dist = getLevenshteinDistance(entry.toLowerCase(), targetBasename.toLowerCase());
+      if (dist < bestDistance) {
+        bestDistance = dist;
+        bestMatch = entry;
+      }
+    }
+
+    // Only return if it's a reasonably close match (e.g., less than ~4 edits)
+    if (bestMatch && bestDistance <= Math.max(3, Math.floor(targetBasename.length * 0.4))) {
+      return path.join(targetDir, bestMatch);
+    }
+  } catch (err) { }
+  return null;
+}
+
+/**
+ * Recursive search helper for search_files tool
+ */
+function searchFilesRecursive(dir, query, maxDepth = 4, currentDepth = 0, results = []) {
+  if (currentDepth > maxDepth || results.length >= 50) return results;
+  if (!isSafePath(dir)) return results;
+  
+  try {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      // Skip common problematic/large directories
+      if (['node_modules', '.git', 'dist', 'build', '.next'].includes(entry.name)) continue;
+      
+      const fullPath = path.join(dir, entry.name);
+      
+      if (entry.name.toLowerCase().includes(query.toLowerCase())) {
+        results.push(fullPath);
+      }
+      
+      if (entry.isDirectory()) {
+         searchFilesRecursive(fullPath, query, maxDepth, currentDepth + 1, results);
+      }
+    }
+  } catch (err) {
+    // Ignore permissions errors during recursive scan
+  }
+  return results;
+}
+
 /**
  * Built-in tools that run in-process — no external MCP server needed.
  * Each tool has: name, description, parameters (Gemini schema), and an execute() function.
@@ -296,6 +406,11 @@ const builtinTools = [
     },
     requiresApproval: false,
     async execute({ directoryPath }) {
+      directoryPath = expandTilde(directoryPath);
+      if (!isSafePath(directoryPath)) {
+        return { success: false, error: 'ERROR: Access to the C: drive is strictly prohibited for security reasons.' };
+      }
+      
       try {
         const entries = fs.readdirSync(directoryPath, { withFileTypes: true });
         const files = entries.map(e => ({
@@ -330,17 +445,80 @@ const builtinTools = [
     },
     requiresApproval: false,
     async execute({ filePath }) {
+      filePath = expandTilde(filePath);
+      if (!isSafePath(filePath)) {
+        return { success: false, error: 'ERROR: Access to the C: drive is strictly prohibited for security reasons.' };
+      }
+
       try {
-        const stat = fs.statSync(filePath);
+        let actualPath = filePath;
+        let note = "";
+        
+        if (!fs.existsSync(actualPath)) {
+           // Try fuzzy match if exact file doesn't exist
+           const dir = path.dirname(actualPath);
+           const base = path.basename(actualPath);
+           const fuzzymatch = fuzzyFindFile(dir, base);
+           
+           if (fuzzymatch) {
+             actualPath = fuzzymatch;
+             note = `(Auto-corrected path from ${base} to ${path.basename(fuzzymatch)} due to typo)`;
+           } else {
+             return { success: false, error: `File not found at ${filePath}. You might want to use the 'search_files' tool to find the correct location.` };
+           }
+        }
+
+        const stat = fs.statSync(actualPath);
         if (stat.size > 100 * 1024) {
           return { success: false, error: 'File too large (>100KB). Cannot read.' };
         }
-        const content = fs.readFileSync(filePath, 'utf8');
+        const content = fs.readFileSync(actualPath, 'utf8');
         return {
           success: true,
-          path: filePath,
+          path: actualPath,
           sizeBytes: stat.size,
+          note: note || undefined,
           content: content
+        };
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
+    }
+  },
+
+  {
+    name: 'search_files',
+    description: 'Searches for files by name within a specific directory. Useful if you know the file name but not the exact folder path.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        query: {
+          type: 'STRING',
+          description: 'The filename or partial filename to search for (e.g., "poem", "index.js")'
+        },
+        directory: {
+          type: 'STRING',
+          description: 'The root directory to start searching from (e.g., "D:\\\\Programming with VS Code\\\\dashboard")'
+        }
+      },
+      required: ['query', 'directory']
+    },
+    requiresApproval: false,
+    async execute({ query, directory }) {
+      directory = expandTilde(directory);
+      if (!isSafePath(directory)) {
+        return { success: false, error: 'ERROR: Searching inside the C: drive is strictly prohibited for security reasons.' };
+      }
+      try {
+        if (!fs.existsSync(directory)) {
+          return { success: false, error: `Directory does not exist: ${directory}` };
+        }
+        
+        const results = searchFilesRecursive(directory, query);
+        return {
+          success: true,
+          matchesFound: results.length,
+          results: results
         };
       } catch (err) {
         return { success: false, error: err.message };
@@ -367,6 +545,11 @@ const builtinTools = [
     },
     requiresApproval: true,
     async execute({ filePath, content }, approvalFn) {
+      filePath = expandTilde(filePath);
+      if (!isSafePath(filePath)) {
+        return { success: false, error: 'ERROR: Writing to the C: drive is strictly prohibited for safety and security reasons.' };
+      }
+
       if (approvalFn) {
         const approved = await approvalFn(`Write file: ${filePath}\n(${content.length} characters)`);
         if (!approved) {
