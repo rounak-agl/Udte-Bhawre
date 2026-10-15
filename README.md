@@ -131,7 +131,8 @@ npm run build:win
 
 ## 📂 Project Structure
 
--   `main.js` Electron main process and window orchestration.
+-   `main.js` Electron entry point: startup order and app lifecycle.
+-   `app/` Main-process modules: `character.js` (a bot's windows, bubble, walking and AI session), `agents.js` (launching/syncing bots), `tray.js`, `overlay.js` (step guides), `control-centre.js`, `security.js` (IPC gatekeeping, navigation guards, approval prompts), and `ipc/` (IPC handlers grouped by feature: chat, agents, data, providers, settings).
 -   `renderer/` UI components and pages (Control Centre, Chat, Character overlays).
 -   `mcp-servers/` Built-in local MCP server for system tools.
 -   `utils/` Database utilities, taskbar geometry, and screen capture logic.

@@ -50,7 +50,7 @@ function createHarness() {
   });
 
   // ── In-memory fake of utils/db.js ──
-  const db = { chats: new Map(), agentsSaved: [], agentsDeleted: [], agentUpdates: [], taskUpdates: [], writes: 0 };
+  const db = { chats: new Map(), agentsSaved: [], agentsDeleted: [], agentUpdates: [], taskUpdates: [], writes: 0, agentsInDb: [] };
   let nextId = 1;
   let clock = Date.now();
   class ChatSession {
@@ -85,11 +85,15 @@ function createHarness() {
     async save() { db.agentsSaved.push(this.data); return this; }
     static async findByIdAndUpdate(id, upd) { db.agentUpdates.push([id, upd]); }
     static async findByIdAndDelete(id) { db.agentsDeleted.push(id); }
-    static find() { return { sort: async () => [] }; }
+    static find() { return { sort: async () => db.agentsInDb.map(a => ({ ...a })) }; }
   }
   require.cache[path.join(REPO, 'utils/db.js')] = {
     exports: {
       connectDB: async () => true,
+      // 'mongodb://good' connects; anything else fails while the previous DB stays up
+      switchDB: async (uri) => (uri === 'mongodb://good'
+        ? { connected: true }
+        : { connected: false, error: 'connection refused', keptPrevious: true }),
       isDBConnected: () => true,
       ChatSession,
       Agent,

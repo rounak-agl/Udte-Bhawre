@@ -220,3 +220,22 @@ test('settings overview endpoints are Control Centre only', async () => {
   const info = await h.ipcHandle['get-app-info']();
   assert.strictEqual(info.version, '0.0.0-test');
 });
+
+// Runs last: switching databases replaces the bots on the desktop
+test('MongoDB URI change: reports the result and syncs agents with the new DB', async () => {
+  const set = (uri) => quiet(() => h.ipcHandle['set-mongodb-uri'](CC(), uri));
+  const running = () => h.main.trayMenuTemplate().filter(i => i.submenu && i.submenu.some(x => x.label === 'Show on desktop')).map(i => i.label.split(' — ')[0]);
+  const before = running();
+  assert.ok(before.length > 0);
+
+  assert.deepStrictEqual(await quiet(() => h.ipcHandle['set-mongodb-uri']({ sender: {} }, 'mongodb://good')), { connected: false, error: 'Not allowed' });
+
+  // A URI that doesn't connect: reported, and nothing on the desktop changes
+  assert.deepStrictEqual(await set('mongodb://typo'), { connected: false, error: 'connection refused', keptPrevious: true });
+  assert.deepStrictEqual(running(), before);
+
+  // A working URI: the new database's agents appear, the previous database's bots go
+  h.db.agentsInDb = [{ _id: 'NEW1', name: 'Fresh', provider: 'codex', theme: 'Moss' }];
+  assert.deepStrictEqual(await set('mongodb://good'), { connected: true });
+  assert.deepStrictEqual(running(), ['Fresh']);
+});

@@ -2,6 +2,71 @@ const EventEmitter = require('events');
 const { getToolDeclarations, executeTool, isBuiltinTool } = require('../mcp-servers/builtin-tools');
 const { ArmorIQGuard, loadArmorIQConfig } = require('./armoriq-guard');
 
+// ── Shared external MCP servers ─────────────────────────────
+// One process per distinct server config, shared by every agent's session and
+// reference-counted: it's stopped when the last session using it shuts down.
+// (Previously every Gemini Vision agent launched its own copy of every server.)
+// The ArmorIQ guard is NOT shared — each session seals its own plan per message.
+const serverPool = new Map(); // key → { ready: Promise<{ client, transport, tools }>, refs }
+
+function serverKey(name, config) {
+  return JSON.stringify([name, config.command, config.args || [], config.env || {}]);
+}
+
+/** Start an external MCP server over stdio and list its tools. */
+async function openExternalServer(name, config) {
+  const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
+  const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+  const transport = new StdioClientTransport({
+    command: config.command,
+    args: config.args || [],
+    env: { ...process.env, ...(config.env || {}) }
+  });
+  const client = new Client(
+    { name: `desktop-assistant-${name}`, version: '1.0.0' },
+    { capabilities: { tools: {} } }
+  );
+  await client.connect(transport);
+  const toolList = await client.listTools();
+  return { client, transport, tools: toolList.tools || [] };
+}
+
+/** Use (or start) the shared server for this config. */
+async function acquireServer(name, config) {
+  const key = serverKey(name, config);
+  let entry = serverPool.get(key);
+  if (!entry) {
+    entry = { refs: 0, ready: McpClientManager.openExternalServer(name, config) };
+    serverPool.set(key, entry);
+    // A server that failed to start isn't cached; the next session tries again
+    entry.ready.catch(() => { if (serverPool.get(key) === entry) serverPool.delete(key); });
+  }
+  entry.refs++;
+  try {
+    return { key, info: await entry.ready };
+  } catch (err) {
+    entry.refs--;
+    throw err;
+  }
+}
+
+/** Stop using a shared server; it's closed once no session uses it. */
+async function releaseServer(key, name) {
+  const entry = serverPool.get(key);
+  if (!entry) return;
+  entry.refs--;
+  if (entry.refs > 0) return;
+  serverPool.delete(key);
+  try {
+    const info = await entry.ready;
+    if (info.client) await info.client.close();
+    if (info.transport) await info.transport.close();
+    console.log(`[MCP] Stopped ${name} (no agents use it any more)`);
+  } catch (err) {
+    console.error(`[MCP] Error stopping ${name}:`, err.message);
+  }
+}
+
 /**
  * MCP Client Manager — routes tool calls between Gemini and tool providers.
  *
@@ -17,7 +82,9 @@ class McpClientManager extends EventEmitter {
   constructor() {
     super();
     this.initialized = false;
-    this.externalClients = new Map(); // serverName → { client, transport, tools }
+    this.externalClients = new Map(); // serverName → { client, transport, tools } (shared, see serverPool)
+    this._poolKeys = new Map();       // serverName → serverPool key this session holds
+    this._closed = false;
     this._approvalFn = null;
     this.guard = null; // ArmorIQ security guard
   }
@@ -28,6 +95,7 @@ class McpClientManager extends EventEmitter {
    * @param {object} mcpServerConfigs - Config map: { serverName: { command, args, env } }
    */
   async initialize(mcpServerConfigs = {}) {
+    this._closed = false;
     // ── Initialize ArmorIQ Guard ──────────────────────────
     try {
       const armorConfig = loadArmorIQConfig();
@@ -251,32 +319,19 @@ class McpClientManager extends EventEmitter {
    * Connect to an external MCP server via stdio transport.
    */
   async _connectExternalServer(name, config) {
+    let acquired;
     try {
-      // Dynamic import for ESM MCP SDK
-      const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-      const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
-
-      const transport = new StdioClientTransport({
-        command: config.command,
-        args: config.args || [],
-        env: { ...process.env, ...(config.env || {}) }
-      });
-
-      const client = new Client(
-        { name: `desktop-assistant-${name}`, version: '1.0.0' },
-        { capabilities: { tools: {} } }
-      );
-
-      await client.connect(transport);
-
-      // Discover available tools
-      const toolList = await client.listTools();
-      const tools = toolList.tools || [];
-
-      this.externalClients.set(name, { client, transport, tools });
+      acquired = await acquireServer(name, config);
     } catch (err) {
       throw new Error(`Failed to connect MCP server "${name}": ${err.message}`);
     }
+    // Shut down while the server was starting: give our share back straight away
+    if (this._closed) {
+      await releaseServer(acquired.key, name);
+      return;
+    }
+    this._poolKeys.set(name, acquired.key);
+    this.externalClients.set(name, acquired.info);
   }
 
   /**
@@ -378,18 +433,18 @@ class McpClientManager extends EventEmitter {
       this.guard = null;
     }
 
-    for (const [name, serverInfo] of this.externalClients) {
-      try {
-        if (serverInfo.client) await serverInfo.client.close();
-        if (serverInfo.transport) await serverInfo.transport.close();
-        console.log(`[MCP] Disconnected from ${name}`);
-      } catch (err) {
-        console.error(`[MCP] Error disconnecting ${name}:`, err.message);
-      }
-    }
+    // Servers are shared with other agents: release our share instead of closing them
+    this._closed = true;
+    const held = [...this._poolKeys];
+    this._poolKeys.clear();
     this.externalClients.clear();
+    for (const [name, key] of held) await releaseServer(key, name);
     this.initialized = false;
   }
 }
+
+// Overridable for tests (avoids spawning real servers)
+McpClientManager.openExternalServer = openExternalServer;
+McpClientManager._serverPool = serverPool;
 
 module.exports = McpClientManager;

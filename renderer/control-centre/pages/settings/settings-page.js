@@ -83,9 +83,17 @@ function SettingsPage() {
     if (window.ccBridge) load().then(v => { if (v) input.value = v; }).catch(() => {});
 
     const saveBtn = window.PFButton({ label: 'Save', variant: 'secondary' });
-    saveBtn.onclick = () => {
-      if (window.ccBridge) save(input.value.trim());
-      window.PFToast.show(savedTitle || 'Saved', savedMessage);
+    saveBtn.onclick = async () => {
+      if (!window.ccBridge) return;
+      saveBtn.disabled = true;
+      try {
+        // save() may resolve to { title, message } to report what actually happened
+        const result = await save(input.value.trim());
+        if (result && result.title) window.PFToast.show(result.title, result.message);
+        else window.PFToast.show(savedTitle || 'Saved', savedMessage);
+      } finally {
+        saveBtn.disabled = false;
+      }
     };
 
     const row = window.pfCreateElement('div', 'pf-form-row');
@@ -153,10 +161,16 @@ function SettingsPage() {
     id: 'db-uri',
     label: 'MongoDB Connection URI',
     placeholder: 'mongodb+srv://...',
-    desc: 'Stores agents, tasks and chat history. Restart the app after changing it.',
+    desc: 'Stores agents, tasks and chat history. Saving connects right away — no restart needed.',
     load: () => window.ccBridge.getMongodbUri(),
-    save: (value) => window.ccBridge.setMongodbUri(value),
-    savedMessage: 'Database URI updated. Restart app to reconnect.'
+    save: async (value) => {
+      const r = await window.ccBridge.setMongodbUri(value);
+      if (r && r.connected) return { title: 'Connected', message: 'Database connected. Your agents and history are loaded.' };
+      const why = (r && r.error) ? ` (${r.error})` : '';
+      return r && r.keptPrevious
+        ? { title: 'Saved, but couldn\'t connect', message: `The new database didn't respond${why}. Still using the previous one until it does.` }
+        : { title: 'Saved, but couldn\'t connect', message: `The database didn't respond${why}. History and agents are unavailable until it connects.` };
+    }
   }));
 
   content.appendChild(generalSection);

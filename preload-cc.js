@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('ccBridge', {
   getElevenLabsApiKey: () => ipcRenderer.invoke('get-eleven-labs-api-key'),
   setElevenLabsApiKey: (key) => ipcRenderer.send('set-eleven-labs-api-key', key),
   getMongodbUri: () => ipcRenderer.invoke('get-mongodb-uri'),
-  setMongodbUri: (uri) => ipcRenderer.send('set-mongodb-uri', uri),
+  setMongodbUri: (uri) => ipcRenderer.invoke('set-mongodb-uri', uri), // → { connected, error, keptPrevious }
   getMcpServers: () => ipcRenderer.invoke('get-mcp-servers'),
   setMcpServers: (servers) => ipcRenderer.send('set-mcp-servers', servers),
   setProvider: (provider) => ipcRenderer.send('set-provider', provider),

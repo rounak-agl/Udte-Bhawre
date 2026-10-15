@@ -1,23 +1,18 @@
-let ccWindow = null;
-let isQuitting = false;
-
-const { app, BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-app.on('before-quit', () => isQuitting = true);
+const { BrowserWindow, ipcMain } = require('electron');
+const state = require('./state');
+const { rendererFile, webPreferences, PRELOAD_CC } = require('./paths');
 
 /**
- * Init CC IPC — ONLY registers cc: prefixed handlers.
- * All shared handlers (get-agents, get-history, get-initial-state, set-theme,
- * set-provider, set-api-key, get-api-key, get-mcp-servers, set-mcp-servers,
- * launch-agent) already live in main.js. The CC preload reuses them directly.
+ * The Control Centre window (dashboard, agents, chat history, settings…).
+ * Its handlers live in app/ipc/*; this module owns the window itself.
  * CC chat history is read-only; conversations happen in each agent's chat window.
  */
-function initControlCentre() {
-  // Window controls are now handled natively by Electron titleBarOverlay
+let ccWindow = null;
 
+function registerControlCentreIpc() {
   // Fetch all tool declarations
   ipcMain.handle('cc:get-mcp-tools', async () => {
-    const { getToolDeclarations } = require('./mcp-servers/builtin-tools');
+    const { getToolDeclarations } = require('../mcp-servers/builtin-tools');
     return getToolDeclarations();
   });
 }
@@ -39,28 +34,25 @@ function openControlCentre(page = 'dashboard') {
     minHeight: 600,
     frame: false,
     titleBarStyle: 'hidden',
-    titleBarOverlay: { 
+    titleBarOverlay: {
       color: '#151A17',
-      symbolColor: '#E8E4DF', 
-      height: 38 
+      symbolColor: '#E8E4DF',
+      height: 38
     },
     backgroundColor: '#151A17',
     show: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload-cc.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    }
+    webPreferences: webPreferences(PRELOAD_CC)
   });
 
-  ccWindow.loadFile('renderer/control-centre/control-centre.html', { hash: page });
+  ccWindow.loadFile(rendererFile('control-centre', 'control-centre.html'), { hash: page });
 
   ccWindow.once('ready-to-show', () => {
     ccWindow.show();
   });
-  
+
+  // Closing hides it (tray app); it really closes when the app quits
   ccWindow.on('close', (e) => {
-    if (!isQuitting) {
+    if (!state.isQuitting) {
       e.preventDefault();
       ccWindow.hide();
     }
@@ -76,4 +68,4 @@ function isControlCentreSender(event) {
   return !!(ccWindow && !ccWindow.isDestroyed() && event.sender === ccWindow.webContents);
 }
 
-module.exports = { initControlCentre, openControlCentre, isControlCentreSender };
+module.exports = { registerControlCentreIpc, openControlCentre, isControlCentreSender };
