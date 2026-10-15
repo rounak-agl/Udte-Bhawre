@@ -120,3 +120,66 @@
   padding: 0 var(--pf-spacing-sm);
   font-size: var(--pf-font-size-caption);
 }
+
+/* Orchestrator switch */
+.pf-agent-orchestrator { align-items: center; cursor: pointer; }
+.pf-toggle {
+  appearance: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border-radius: var(--pf-radius-full);
+  background: var(--pf-color-border);
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.pf-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--pf-color-surface-secondary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s;
+}
+.pf-toggle:checked { background: var(--pf-color-accent-primary); }
+.pf-toggle:checked::after { transform: translateX(14px); }
+.pf-toggle:focus-visible { outline: 2px solid var(--pf-color-accent-primary); outline-offset: 2px; }
+.pf-agent-actions { flex-wrap: wrap; }
+
+.pf-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-spacing-sm);
+  font-size: var(--pf-font-size-body);
+  color: var(--pf-color-text-primary);
+  cursor: pointer;
+}
+
+/* Team memory modal */
+.pf-memory-box { width: min(560px, calc(100vw - 32px)); }
+.pf-memory-hint { margin: 0; font-size: var(--pf-font-size-caption); color: var(--pf-color-text-secondary); }
+.pf-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-sm);
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.pf-memory-note {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-spacing-sm);
+  padding: var(--pf-spacing-md);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-md);
+}
+.pf-memory-body { flex: 1; min-width: 0; }
+.pf-memory-text { font-size: var(--pf-font-size-body); color: var(--pf-color-text-primary); overflow-wrap: anywhere; }
+.pf-memory-meta { margin-top: 4px; font-size: var(--pf-font-size-caption); color: var(--pf-color-text-muted); }
+.pf-memory-empty { padding: var(--pf-spacing-xl) 0; text-align: center; color: var(--pf-color-text-muted); }

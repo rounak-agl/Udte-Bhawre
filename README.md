@@ -85,6 +85,18 @@ Every agent has its own provider. Change it on the **Agents** page, from the age
 
 Keys are encrypted at rest with your OS keychain (Electron `safeStorage`).
 
+### 🧩 Orchestrator agents and sub-agents
+
+Agents are **orchestrators** by default. When a request has several parts, the agent can split it into sub-tasks and hand them to **sub-agents** that work in the background. Each sub-agent can use a different provider (e.g. Claude for writing, a local model for something private), and the agent then combines their results into one answer. Simple questions are answered directly.
+
+- **Live progress:** a card in the chat shows each sub-agent working. Click a row to see its output, or **Cancel** to stop them (the agent answers with what they have so far).
+- **Tasks page:** every sub-task appears there with its provider, duration and result. Use **Sub-agent tasks** to see only those.
+- **Team memory:** the agent and its sub-agents can save durable facts (your preferences, decisions, findings). Sub-agents that start later see what earlier ones saved, and the memory carries into later conversations. View or clear it under **Agents → Team memory**.
+- **Limits:** up to 6 sub-tasks per request, 3 at a time, 5 minutes each. Sub-agents can't create their own sub-agents.
+- **Turn it off:** use **Agents → Orchestrator**. Sub-agents use desktop tools only if the agent has tools on, and those calls still go through ArmorIQ and the approval prompts.
+
+Delegation is a small text protocol (`sessions/orchestration.js`), so every provider can orchestrate. Small local models may follow it less reliably.
+
 ### 🖼 Screenshots and images
 
 The app never looks at your screen on its own. To show an agent something, use the 📎 button next to the message box:
@@ -99,6 +111,8 @@ Images are sent to the agent's provider (Google, Anthropic, OpenAI, or your loca
 ### 🛡 ArmorIQ guard
 
 Desktop tools are protected by ArmorIQ. Add your key in **Control Centre → Settings → Security** and use **Test connection** to check it. Each chat shows the guard's live state as a badge: **Protected**, **Asking you** (ArmorIQ unreachable, so each action asks for Allow / Deny), **Guard error**, or **Guard off**. The `ARMORIQ_API_KEY` environment variable overrides the Settings key for development.
+
+For each request that uses tools, the agent first lists every tool the whole task will need, working only from your conversation and never from what a tool returned. ArmorIQ signs that plan, so multi-step work (e.g. look up your GitHub user → create a branch → commit a file) runs without interruption. If the agent then reaches for a tool outside the signed plan, it's checked against your request, again without anything a tool or sub-agent returned. If your request calls for it, ArmorIQ signs an updated plan and the step runs; risky tools (shell, file writes, opening URLs) still ask you as usual. Otherwise you're asked first: allow it and ArmorIQ signs an updated plan; deny it and the step is blocked.
 
 ### 🔌 Connectors (MCP Marketplace)
 
@@ -156,9 +170,9 @@ npm run build:win
 ## 📂 Project Structure
 
 -   `main.js` Electron entry point: startup order and app lifecycle.
--   `app/` Main-process modules: `character.js` (a bot's windows, bubble, walking and AI session), `agents.js` (launching/syncing bots), `tray.js`, `control-centre.js`, `security.js` (IPC gatekeeping, navigation guards, approval prompts, MCP config validation), and `ipc/` (IPC handlers grouped by feature: chat, agents, data, providers, settings, marketplace).
+-   `app/` Main-process modules: `character.js` (a bot's windows, bubble, walking and AI session), `agents.js` (launching/syncing bots), `orchestrator.js` (runs an agent's sub-agents), `tray.js`, `control-centre.js`, `security.js` (IPC gatekeeping, navigation guards, approval prompts, MCP config validation), and `ipc/` (IPC handlers grouped by feature: chat, agents, data, providers, settings, marketplace).
 -   `renderer/` UI components and pages (Control Centre, Chat, the walking characters).
 -   `mcp-servers/` Built-in desktop tools and the curated Connectors catalog (`catalog.js`).
 -   `utils/` Database utilities, taskbar geometry, and the on-demand screenshot for 📷 in chat (`screenshot.js`).
--   `sessions/` AI model sessions: `providers.js` (registry of all providers), `cli-session.js` (shared base for the Claude/Codex/Copilot CLIs), `vision-session.js` (Gemini API + tools), `ollama-session.js` (local models), `mcp-client.js` (built-in + external MCP servers, local and hosted), `mcp-registry.js` (MCP Registry search).
+-   `sessions/` AI model sessions: `providers.js` (registry of all providers), `cli-session.js` (shared base for the Claude/Codex/Copilot CLIs), `vision-session.js` (Gemini API + tools), `ollama-session.js` (local models), `mcp-client.js` (built-in + external MCP servers, local and hosted), `mcp-registry.js` (MCP Registry search), `orchestration.js` (delegation protocol) and `team-memory.js`.
 -   `test/` Automated tests (`npm test`).

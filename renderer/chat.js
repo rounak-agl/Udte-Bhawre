@@ -329,12 +329,19 @@ function addSecurityEvent(eventPayload) {
       bgColor = '#27AE60';
       messageContent = `<div><strong>Intent Plan Sealed</strong>`
         + `<br><span style="opacity:0.8;font-size:11px;">Token: ${safeEscape(data.tokenHash || 'N/A')}</span>`
-        + `<br><span style="opacity:0.8;font-size:11px;">Authorized: [${(Array.isArray(data.authorizedTools) ? data.authorizedTools : []).join(', ')}]</span></div>`;
+        + `<br><span style="opacity:0.8;font-size:11px;">Authorized: [${(Array.isArray(data.authorizedTools) ? data.authorizedTools : []).map(t => safeEscape(String(t))).join(', ')}]</span></div>`;
       break;
     case 'fallback-approved':
       icon = '✋';
       bgColor = '#2980B9';
       messageContent = `<div><strong>Allowed by you</strong><br><span style="opacity:0.85;font-size:11px;">${safeEscape(data.tool || 'Tool')} ran with your approval — ArmorIQ couldn't verify it.</span></div>`;
+      break;
+    case 'plan-extended':
+      icon = '✋';
+      bgColor = '#2980B9';
+      messageContent = data.by === 'auto'
+        ? `<div><strong>Plan extended</strong><br><span style="opacity:0.85;font-size:11px;">${safeEscape(data.tool || 'Tool')} is part of your request — ArmorIQ signed an updated plan with it.</span></div>`
+        : `<div><strong>Extra step allowed by you</strong><br><span style="opacity:0.85;font-size:11px;">${safeEscape(data.tool || 'Tool')} wasn't in the original plan — ArmorIQ signed an updated plan with it.</span></div>`;
       break;
     case 'tool-allowed':
       icon = '✅';
@@ -486,7 +493,7 @@ function handleSlashCommand(cmd) {
   switch (parts[0]) {
     case '/copy':
       if (lastAssistantText) {
-        navigator.clipboard.writeText(lastAssistantText).then(() => {
+        navigator.clipboard.writeText(visibleAssistantText()).then(() => {
           addMessage('system', '📋 Copied last response to clipboard.');
         }).catch(() => {
           addMessage('error', 'Clipboard: Failed to copy — browser denied clipboard access.');
@@ -662,8 +669,124 @@ container.addEventListener('drop', (e) => {
   addImageFiles(e.dataTransfer.files);
 });
 
+/** The last reply as shown (without orchestration protocol blocks), for copying. */
+function visibleAssistantText() {
+  return window.PFMarkdown?.hideProtocolBlocks ? window.PFMarkdown.hideProtocolBlocks(lastAssistantText) : lastAssistantText;
+}
+
+// ─── Sub-agents (orchestrator agents hand parts of a request to them) ───
+// Main sends a snapshot on every change; one card per delegation round. Task titles and
+// results are model output, so everything is set with textContent.
+const subagentCards = new Map(); // runId → { el, data }
+let subagentTimer = null;
+let subagentsActive = false;
+
+const STATUS_LABELS = { waiting: 'Waiting', queued: 'Queued', running: 'Working', done: 'Done', failed: 'Failed' };
+
+function formatElapsed(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function renderSubagentCard(card) {
+  const { data } = card;
+  const done = data.tasks.filter(t => t.status === 'done' || t.status === 'failed').length;
+  const failed = data.tasks.filter(t => t.status === 'failed').length;
+  card.el.replaceChildren();
+  card.el.classList.toggle('active', data.active);
+
+  const head = el('div', 'subagents-head');
+  head.appendChild(el('span', 'subagents-title',
+    data.active
+      ? `🧩 Sub-agents working · ${done}/${data.tasks.length} done`
+      : `🧩 Sub-agents finished · ${data.tasks.length - failed} done${failed ? `, ${failed} failed` : ''}`));
+  if (data.active) {
+    const cancel = el('button', 'subagents-cancel', 'Cancel');
+    cancel.type = 'button';
+    cancel.title = 'Stop the sub-agents; the orchestrator answers with what they have so far';
+    cancel.addEventListener('click', () => { cancel.disabled = true; window.assistant.cancelSubagents(); });
+    head.appendChild(cancel);
+  }
+  card.el.appendChild(head);
+
+  for (const t of data.tasks) {
+    const row = el('div', `subagent-row status-${t.status}`);
+    const top = el('button', 'subagent-top');
+    top.type = 'button';
+    top.setAttribute('aria-expanded', String(card.open.has(t.id)));
+    top.appendChild(el('span', 'subagent-emoji', t.emoji || '•'));
+    const main = el('span', 'subagent-main');
+    main.appendChild(el('span', 'subagent-name', t.title));
+    const elapsed = t.startedAt ? formatElapsed((t.finishedAt || Date.now()) - t.startedAt) : '';
+    main.appendChild(el('span', 'subagent-meta', [t.providerName, elapsed].filter(Boolean).join(' · ')));
+    top.appendChild(main);
+    top.appendChild(el('span', `subagent-pill pill-${t.status}`, STATUS_LABELS[t.status] || t.status));
+    top.addEventListener('click', () => {
+      if (card.open.has(t.id)) card.open.delete(t.id); else card.open.add(t.id);
+      renderSubagentCard(card);
+    });
+    row.appendChild(top);
+    if (card.open.has(t.id)) row.appendChild(el('div', 'subagent-preview', t.preview || (t.status === 'running' ? 'Working…' : 'No output yet')));
+    card.el.appendChild(row);
+  }
+}
+
+function setSubagentsActive(active) {
+  subagentsActive = active;
+  inputField.disabled = active;
+  btnSend.disabled = active;
+  inputField.placeholder = active ? 'Sub-agents are working…' : `Ask ${providerInfo(currentProvider).name} anything...`;
+  if (active && !subagentTimer) {
+    // Tick the elapsed times
+    subagentTimer = setInterval(() => subagentCards.forEach(c => { if (c.data.active) renderSubagentCard(c); }), 1000);
+  } else if (!active && subagentTimer) {
+    clearInterval(subagentTimer);
+    subagentTimer = null;
+  }
+}
+
+window.assistant.onSubagentsUpdate((data) => {
+  if (!data || !Array.isArray(data.tasks)) return;
+  let card = subagentCards.get(data.runId);
+  if (!card) {
+    hideTypingIndicator();
+    finishStreamingMessage();
+    card = { el: el('div', 'message subagents-card'), data, open: new Set() };
+    card.el.setAttribute('role', 'status');
+    subagentCards.set(data.runId, card);
+    messagesEl.appendChild(card.el);
+    onMessageAdded();
+  }
+  card.data = data;
+  renderSubagentCard(card);
+  setSubagentsActive([...subagentCards.values()].some(c => c.data.active));
+  sessionStatusEl.textContent = data.active ? 'Sub-agents working…' : 'Writing the answer…';
+  if (!data.active) showTypingIndicator(); // the orchestrator now answers with the results
+  scrollToBottom();
+});
+
+/** A finished delegation, replayed from history: one line per task. */
+function addDelegationSummary(text) {
+  const card = el('div', 'message subagents-card');
+  card.appendChild(el('div', 'subagents-head')).appendChild(el('span', 'subagents-title', '🧩 Sub-agents'));
+  String(text || '').split('\n').filter(Boolean).forEach(line => {
+    const failed = line.startsWith('✗');
+    card.appendChild(el('div', `subagent-summary ${failed ? 'status-failed' : 'status-done'}`, line));
+  });
+  messagesEl.appendChild(card);
+  onMessageAdded();
+}
+
 // ─── Send message ───
 function sendMessage() {
+  if (subagentsActive) return;
   const text = inputField.value.trim();
   if (!text && !attachments.length) return;
 
@@ -701,7 +824,7 @@ inputField.addEventListener('keydown', (e) => {
 
 btnCopy.addEventListener('click', () => {
   if (lastAssistantText) {
-    navigator.clipboard.writeText(lastAssistantText).then(() => {
+    navigator.clipboard.writeText(visibleAssistantText()).then(() => {
       btnCopy.style.color = 'var(--success)';
       setTimeout(() => { btnCopy.style.color = ''; }, 1000);
     }).catch(() => {
@@ -793,7 +916,11 @@ window.assistant.onChatHistory((history) => {
     if (!msg || !msg.role) continue;
     switch (msg.role) {
       case 'user':
-        addMessage('user', msg.text);
+        // Messages the app sent for the user (sub-agent results) aren't shown
+        if (!msg.internal) addMessage('user', msg.text);
+        break;
+      case 'delegation':
+        addDelegationSummary(msg.text);
         break;
       case 'assistant':
         addMessage('assistant', msg.text);

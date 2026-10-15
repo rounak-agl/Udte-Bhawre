@@ -500,6 +500,21 @@ class ArmorIQGuard extends EventEmitter {
   }
 
   /**
+   * Add one tool to this turn's plan and have ArmorIQ sign the extended plan. Only
+   * called after the user approved the extra step (see McpClientManager). Returns true
+   * when the new signed plan is in place; on failure the plan is cleared (fail-closed).
+   */
+  async extendPlan(tool) {
+    if (!this.enabled || !this.currentPlan) return false;
+    const tools = [
+      ...this.currentPlan.steps.map(s => ({ name: s.tool || s.action, description: s.description })),
+      { name: tool.name, description: tool.description || tool.name }
+    ];
+    const plan = await this.onLlmInput({ prompt: this.currentPlan.goal, tools });
+    return !!plan && this.allowedActions.has(String(tool.name).toLowerCase());
+  }
+
+  /**
    * Forget the current plan/token. Call at the start of every user turn so a
    * previous turn's plan can never authorize this turn's tool calls.
    */

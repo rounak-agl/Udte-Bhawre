@@ -37,9 +37,11 @@ const { registerDataIpc } = require('./app/ipc/data');
 const { registerProviderIpc } = require('./app/ipc/providers');
 const { registerSettingsIpc } = require('./app/ipc/settings');
 const { registerMarketplaceIpc } = require('./app/ipc/marketplace');
+const { registerOrchestrationIpc } = require('./app/ipc/orchestration');
 const { migrateSecrets, getMongodbUri } = require('./sessions/agent-session');
 const { status: secretStatus } = require('./utils/secret-store');
 const { connectDB } = require('./utils/db');
+const { markInterruptedTasks } = require('./app/orchestrator');
 
 // ── Security + IPC (registered at load, before any window exists) ──
 installNavigationGuards(app);
@@ -49,6 +51,7 @@ registerDataIpc();
 registerProviderIpc();
 registerSettingsIpc();
 registerMarketplaceIpc();
+registerOrchestrationIpc();
 registerControlCentreIpc();
 
 // ── Lifecycle ──
@@ -62,6 +65,7 @@ app.whenReady().then(async () => {
   try {
     const connected = await connectDB(getMongodbUri() || process.env.MONGODB_URI);
     if (connected) {
+      await markInterruptedTasks(); // sub-agent tasks cut off by the last quit
       console.log('[DB] Loading stored agents...');
       await syncAgentsWithDB();
     }

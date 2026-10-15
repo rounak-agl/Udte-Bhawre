@@ -3,7 +3,7 @@ const EventEmitter = require('events');
 const os = require('os');
 const { findBinary, getProcessEnv } = require('../utils/shell-env');
 const { getProviderEnv } = require('./agent-session');
-const { buildTranscript, userTurnText } = require('./conversation-context');
+const { buildTranscript, userEntry } = require('./conversation-context');
 
 /**
  * Base class for providers that run a command-line tool (Claude, Codex, Copilot).
@@ -66,9 +66,10 @@ class CliSession extends EventEmitter {
    * Per-message mode: a fresh process for each message.
    * @param {Array<{mimeType: string, data: string}>} [images] base64 images (providers
    *   whose registry entry has supportsImages)
+   * @param {{internal?: boolean}} [opts] sent by the app, not typed by the user
    */
-  send(message, images = []) {
-    this.history.push({ role: 'user', text: userTurnText(message, images.length) });
+  send(message, images = [], opts = {}) {
+    this.history.push(userEntry(message, images.length, opts));
     this.isBusy = true;
     this.outputBuffer = '';
     this.killProcess();

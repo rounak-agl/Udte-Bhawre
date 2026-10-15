@@ -4,9 +4,12 @@ const state = require('./state');
 const { rendererFile, webPreferences } = require('./paths');
 const { providerFor } = require('./provider-choice');
 const { approveToolCall, emitSecurityEventToUI } = require('./security');
+const { Orchestrator } = require('./orchestrator');
 const { getTaskbarGeometry } = require('../utils/taskbar');
 const { getCurrentTheme, getApiKey } = require('../sessions/agent-session');
 const { listProviders, createSession: createProviderSession } = require('../sessions/providers');
+const { buildOrchestratorInstructions } = require('../sessions/orchestration');
+const teamMemory = require('../sessions/team-memory');
 const { isDBConnected, ChatSession } = require('../utils/db');
 
 /**
@@ -96,6 +99,9 @@ class Character {
     this.sessionId = null;            // ChatSession document the conversation is saved to
     this.systemPromptFile = null;
     this.toolsEnabled = true;         // per-agent: desktop tools for Gemini Vision
+    this.orchestrator = true;         // per-agent: may hand sub-tasks to sub-agents
+    this.teamMemoryText = '';         // team memory as prompt text (see refreshTeamMemory)
+    this.orchestration = new Orchestrator(this);
     this.restoredHistory = null;      // last saved conversation, loaded at launch
     this.historyLoaded = Promise.resolve();
     this._saveChain = Promise.resolve();
@@ -246,8 +252,9 @@ class Character {
       toolsEnabled: this.toolsEnabled !== false
     });
 
-    // Agent persona/context file: applied before start so CLI providers get it at launch
-    this.session.systemPrompt = this.loadSystemPrompt();
+    // Persona/context file (+ orchestration instructions): set before start so CLI
+    // providers get it at launch
+    this.session.systemPrompt = this.buildSystemPrompt(providerKey);
 
     // Conversation memory (errors are transient and not carried over)
     this.session.history = carried.filter(m => m && m.role !== 'error').map(m => ({ ...m }));
@@ -295,6 +302,7 @@ class Character {
     this.session.on('security:tool-allowed', (data) => emitSecurityEventToUI('tool-allowed', data, this));
     this.session.on('security:enforcement-block', (data) => emitSecurityEventToUI('enforcement-block', data, this));
     this.session.on('security:fallback-approved', (data) => emitSecurityEventToUI('fallback-approved', data, this));
+    this.session.on('security:plan-extended', (data) => emitSecurityEventToUI('plan-extended', data, this));
 
     this.session.on('sessionReady', () => {
       if (this.chatWindow && !this.chatWindow.isDestroyed()) {
@@ -316,6 +324,9 @@ class Character {
       if (this.agentId && this.session.history.length > 0) {
         this.saveSessionHistory();
       }
+
+      // Did the reply hand work to sub-agents (or save team memory)?
+      this.orchestration.handleTurn().catch(err => console.error('[Orchestrator]', err));
     });
 
 
@@ -336,6 +347,38 @@ class Character {
     if (this.chatWindow && !this.chatWindow.isDestroyed()) {
       this.chatWindow.webContents.send('guard-status', this.guardState);
     }
+  }
+
+  providerKey() {
+    return providerFor(this);
+  }
+
+  /** Persona/context file, plus how to delegate (with team memory) for orchestrators. */
+  buildSystemPrompt(providerKey = providerFor(this)) {
+    const persona = this.loadSystemPrompt();
+    if (this.orchestrator === false) return persona;
+    const orchestration = buildOrchestratorInstructions({
+      providers: listProviders(),
+      memory: this.teamMemoryText,
+      selfProvider: providerKey
+    });
+    return [persona, orchestration].filter(Boolean).join('\n\n');
+  }
+
+  /**
+   * Reload team memory into the prompt. Providers that read the prompt per message
+   * (Gemini, Ollama, Codex) see new notes on the next message; Claude gets them in the
+   * sub-agent results message.
+   */
+  async refreshTeamMemory() {
+    this.teamMemoryText = await teamMemory.getMemoryText(this.agentId);
+    if (this.session) this.session.systemPrompt = this.buildSystemPrompt();
+  }
+
+  /** Orchestrator on/off for this agent (Agents page). Applies to the next message. */
+  setOrchestrator(enabled) {
+    this.orchestrator = !!enabled;
+    if (this.session) this.session.systemPrompt = this.buildSystemPrompt();
   }
 
   /**
@@ -536,6 +579,7 @@ class Character {
 
   destroy() {
     this._destroying = true;
+    this.orchestration.cancel();
     this.stopThinking();
     this.hideBubble();
     if (this.session) {
@@ -582,6 +626,7 @@ class Character {
         role: msg.role || 'system',
         text: msg.text || `[${msg.role}]`,
         isTool: msg.isTool || msg.role === 'toolUse' || msg.role === 'toolResult' || false,
+        internal: !!msg.internal,
         timestamp: msg.timestamp || new Date()
       }));
 

@@ -64,6 +64,11 @@ function registerChatIpc() {
       return;
     }
     if (!text.trim() && !images.length) return;
+    if (char.orchestration.isRunning()) {
+      char.sendToChat('chat-error', 'Sub-agents are still working on your last request — wait for them, or cancel them on their card.');
+      char.sendToChat('chat-turn-complete');
+      return;
+    }
     const provider = getProviderInfo(providerFor(char));
     if (images.length && !provider?.supportsImages) {
       char.sendToChat('chat-error', `${provider?.name || 'This provider'} can't read images. Switch provider in ⚙ (Gemini Vision, Claude, Codex or a local vision model).`);
@@ -71,8 +76,15 @@ function registerChatIpc() {
       return;
     }
     if (!char.session) char.createSession();
+    char.orchestration.onUserMessage();
     char.startThinking();
     char.session.send(text, images);
+  });
+
+  // ✕ on the sub-agents card: stop them; partial results still go to the orchestrator
+  ipcMain.on('chat-cancel-subagents', (event) => {
+    const char = charForChatSender(event);
+    if (char) char.orchestration.cancel();
   });
 
   // 📷 in a chat: one screenshot, only when the user asks. The chat window steps aside

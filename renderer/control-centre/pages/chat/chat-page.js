@@ -121,7 +121,8 @@ function ChatPage() {
         style: 'text-align: center; padding: 32px; color: var(--pf-color-text-muted);'
       }));
     } else {
-      messages.forEach(msg => {
+      // App-sent messages (sub-agent results handed to the orchestrator) aren't shown
+      messages.filter(msg => !msg.internal).forEach(msg => {
         messagesBox.appendChild(renderMsg(msg));
       });
     }
@@ -161,7 +162,10 @@ function ChatPage() {
     const role = msg.role === 'user' ? 'user' : 'assistant';
     const wrapper = pfCreateElement('div', `pf-message pf-message--${role}`);
     const bubble = pfCreateElement('div', 'pf-message-bubble');
-    if (role === 'assistant' && window.PFMarkdown) {
+    if (msg.role === 'delegation') {
+      bubble.textContent = `🧩 Sub-agents\n${msg.text || ''}`;
+      bubble.style.whiteSpace = 'pre-wrap';
+    } else if (role === 'assistant' && window.PFMarkdown) {
       bubble.innerHTML = window.PFMarkdown.render(msg.text || '');
     } else {
       bubble.textContent = msg.text || '';

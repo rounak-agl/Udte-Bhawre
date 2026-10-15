@@ -106,6 +106,28 @@ function AgentsPage() {
       providerRow.appendChild(providerSelect);
       details.appendChild(providerRow);
       details.appendChild(makeRow('Theme', agent.theme || 'Midnight'));
+
+      // Orchestrator: may split requests into sub-tasks for sub-agents (applies live)
+      const orchRow = pfCreateElement('label', 'pf-agent-detail-row pf-agent-orchestrator');
+      orchRow.appendChild(pfCreateElement('span', 'pf-agent-detail-label', {
+        textContent: 'Orchestrator',
+        title: 'Can hand parts of a request to sub-agents (any provider), which share a team memory'
+      }));
+      const orchToggle = pfCreateElement('input', 'pf-toggle', { type: 'checkbox', role: 'switch', 'aria-label': `${agent.name} can use sub-agents` });
+      orchToggle.checked = agent.orchestrator !== false;
+      orchToggle.onchange = async () => {
+        const on = orchToggle.checked;
+        const ok = window.ccBridge && await window.ccBridge.setAgentOrchestrator(String(agent._id), on);
+        if (ok) {
+          agent.orchestrator = on;
+          window.PFToast.show('Updated', on ? `${agent.name} can now use sub-agents.` : `${agent.name} will answer everything itself.`);
+        } else {
+          orchToggle.checked = !on;
+          window.PFToast.show('Error', `Could not update ${agent.name}.`);
+        }
+      };
+      orchRow.appendChild(orchToggle);
+      details.appendChild(orchRow);
       card.appendChild(details);
 
       const actions = pfCreateElement('div', 'pf-agent-actions');
@@ -125,6 +147,10 @@ function AgentsPage() {
         }
       };
       actions.appendChild(deleteBtn);
+
+      const memoryBtn = window.PFButton({ label: 'Team memory', variant: 'ghost', size: 'sm' });
+      memoryBtn.onclick = () => showTeamMemory(agent);
+      actions.appendChild(memoryBtn);
 
       const launchBtn = window.PFButton({ label: isLaunched ? 'Running' : 'Launch', variant: 'primary', size: 'sm', disabled: isLaunched });
       launchBtn.onclick = () => {
@@ -191,6 +217,13 @@ function AgentsPage() {
     box.appendChild(contextInput);
     box.appendChild(browseBtn);
 
+    const orchLabel = pfCreateElement('label', 'pf-checkbox-row');
+    const orchBox = pfCreateElement('input', '', { type: 'checkbox' });
+    orchBox.checked = true;
+    orchLabel.appendChild(orchBox);
+    orchLabel.appendChild(pfCreateElement('span', '', { textContent: 'Orchestrator — can hand parts of a request to sub-agents' }));
+    box.appendChild(orchLabel);
+
     const footer = pfCreateElement('div', 'pf-modal-footer', { style: 'margin-top: 24px; display: flex; justify-content: flex-end; gap: 12px;' });
     
     const cancelBtn = window.PFButton({ label: 'Cancel', variant: 'ghost' });
@@ -203,6 +236,7 @@ function AgentsPage() {
         provider: provider.select.value,
         theme: theme.select.value,
         contextFile: contextInput.querySelector('input').value.trim(),
+        orchestrator: orchBox.checked
       };
       if (window.ccBridge) {
         const success = await window.ccBridge.saveAgent(config);
@@ -221,6 +255,63 @@ function AgentsPage() {
     box.appendChild(footer);
     modal.appendChild(box);
     document.body.appendChild(modal);
+  }
+
+  /** Notes this agent and its sub-agents keep between conversations (text only). */
+  async function showTeamMemory(agent) {
+    const modal = pfCreateElement('div', 'pf-modal-overlay');
+    const box = pfCreateElement('div', 'pf-modal-box pf-memory-box');
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', `${agent.name}'s team memory`);
+    box.appendChild(pfCreateElement('h2', '', { textContent: `${agent.name} · Team memory` }));
+    box.appendChild(pfCreateElement('p', 'pf-memory-hint', {
+      textContent: 'Facts the agent and its sub-agents chose to keep. They\'re added to its prompts so it remembers them in later conversations.'
+    }));
+    const list = pfCreateElement('div', 'pf-memory-list');
+    box.appendChild(list);
+
+    const footer = pfCreateElement('div', 'pf-modal-footer');
+    const clearBtn = window.PFButton({ label: 'Clear all', variant: 'ghost' });
+    const closeBtn = window.PFButton({ label: 'Close', variant: 'primary' });
+    footer.append(clearBtn, closeBtn);
+    box.appendChild(footer);
+    modal.appendChild(box);
+    document.body.appendChild(modal);
+    const close = () => { modal.remove(); document.removeEventListener('keydown', onKey); };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    closeBtn.onclick = close;
+    modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+
+    async function render() {
+      const notes = (await window.ccBridge.getTeamMemory(String(agent._id))) || [];
+      list.replaceChildren();
+      clearBtn.disabled = !notes.length;
+      if (!notes.length) {
+        list.appendChild(pfCreateElement('div', 'pf-memory-empty', { textContent: 'Nothing saved yet.' }));
+        return;
+      }
+      notes.slice().reverse().forEach(n => {
+        const row = pfCreateElement('div', 'pf-memory-note');
+        const body = pfCreateElement('div', 'pf-memory-body');
+        body.appendChild(pfCreateElement('div', 'pf-memory-text', { textContent: n.text }));
+        const when = n.createdAt ? new Date(n.createdAt).toLocaleString() : '';
+        body.appendChild(pfCreateElement('div', 'pf-memory-meta', {
+          textContent: [n.author === 'orchestrator' ? agent.name : n.author, n.provider && providerName(n.provider), when].filter(Boolean).join(' · ')
+        }));
+        const del = window.PFButton({ label: 'Delete', variant: 'ghost', size: 'sm' });
+        del.onclick = async () => {
+          if (await window.ccBridge.deleteTeamMemory(String(agent._id), n._id)) render();
+        };
+        row.append(body, del);
+        list.appendChild(row);
+      });
+    }
+    clearBtn.onclick = async () => {
+      if (!confirm(`Forget everything in ${agent.name}'s team memory?`)) return;
+      if (await window.ccBridge.clearTeamMemory(String(agent._id))) render();
+    };
+    render();
   }
 
   loadAgents();

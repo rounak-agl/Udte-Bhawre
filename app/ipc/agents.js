@@ -58,7 +58,8 @@ function registerAgentIpc() {
         provider,
         theme,
         contextFile: typeof config.contextFile === 'string' ? config.contextFile.trim() : '',
-        toolsEnabled: config.toolsEnabled !== false
+        toolsEnabled: config.toolsEnabled !== false,
+        orchestrator: config.orchestrator !== false
       }).save();
       return true;
     } catch (err) {

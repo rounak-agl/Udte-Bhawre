@@ -82,6 +82,8 @@ const agentSchema = new mongoose.Schema({
   contextFile: { type: String, default: '' },
   autoLaunch: { type: Boolean, default: false },
   toolsEnabled: { type: Boolean, default: true },
+  // May split work into sub-tasks for sub-agents (the model decides per message)
+  orchestrator: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now }
 });
 
@@ -89,6 +91,8 @@ const messageSchema = new mongoose.Schema({
   role: { type: String, required: true },
   text: { type: String, default: '' },
   isTool: { type: Boolean, default: false },
+  // Sent by the app, not typed by the user (e.g. sub-agent results handed back)
+  internal: { type: Boolean, default: false },
   timestamp: { type: Date, default: Date.now }
 });
 
@@ -103,18 +107,36 @@ const chatSessionSchema = new mongoose.Schema({
 const taskSchema = new mongoose.Schema({
   title: { type: String, required: true },
   description: { type: String, default: '' },
-  status: { type: String, enum: ['todo', 'in-progress', 'done'], default: 'todo' },
+  status: { type: String, enum: ['todo', 'in-progress', 'done', 'failed'], default: 'todo' },
   priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
   agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Agent' },
+  // Sub-agent tasks (created by an orchestrator agent; see app/orchestrator.js)
+  orchestratorRunId: { type: String, index: true },
+  provider: { type: String },
+  result: { type: String, maxlength: 20000 },
+  error: { type: String },
+  startedAt: { type: Date },
+  finishedAt: { type: Date },
   createdAt: { type: Date, default: Date.now }
 });
 
 
 
+// Team memory: notes an orchestrator agent and its sub-agents share across runs
+const teamMemorySchema = new mongoose.Schema({
+  agentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Agent', required: true, index: true },
+  text: { type: String, required: true, maxlength: 1000 },
+  author: { type: String, default: 'orchestrator' },
+  provider: { type: String, default: '' },
+  runId: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now }
+});
+
 // Models
 const Agent = mongoose.model('Agent', agentSchema);
 const ChatSession = mongoose.model('ChatSession', chatSessionSchema);
 const Task = mongoose.model('Task', taskSchema);
+const TeamMemory = mongoose.model('TeamMemory', teamMemorySchema);
 
 module.exports = {
   connectDB,
@@ -122,5 +144,6 @@ module.exports = {
   isDBConnected,
   Agent,
   ChatSession,
-  Task
+  Task,
+  TeamMemory
 };

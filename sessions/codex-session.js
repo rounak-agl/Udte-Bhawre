@@ -34,7 +34,9 @@ class CodexSession extends CliSession {
   }
 
   removeImageFiles() {
-    for (const f of this.imageFiles || []) fs.rm(f, { force: true }, () => {});
+    for (const f of this.imageFiles || []) {
+      try { fs.rmSync(f, { force: true }); } catch (_) { /* already gone */ }
+    }
     this.imageFiles = [];
   }
 

@@ -92,3 +92,21 @@ test('chat attachments: 📎 menu in the input area, styled, images rendered wit
   const add = chatJs.slice(chatJs.indexOf('function addMessage'), chatJs.indexOf('function addToolMessage'));
   assert.ok(add.includes("strip.className = 'message-images'") && add.includes('createTextNode(text)'), 'user text stays text');
 });
+
+test('orchestration UI: protocol blocks hidden, cards built from text, styles present', () => {
+  // The shared markdown renderer hides ```delegate / ```remember blocks (chat + Control Centre)
+  global.window = global.window || {};
+  require(path.join(renderer, 'control-centre/core/markdown.js'));
+  const md = global.window.PFMarkdown;
+  assert.strictEqual(md.render('ok\n```delegate\n{"tasks":[]}\n```'), 'ok<br><br><em>📋 Handing this to sub-agents…</em>');
+  assert.strictEqual(md.render('typing ```deleg'), 'typing');
+  assert.match(md.render('```js\nx\n```'), /pf-code-block/, 'normal code blocks unaffected');
+
+  const chatJs = fs.readFileSync(path.join(renderer, 'chat.js'), 'utf8');
+  const cards = chatJs.slice(chatJs.indexOf('// ─── Sub-agents'), chatJs.indexOf('// ─── Send message'));
+  assert.ok(!cards.includes('innerHTML'), 'task titles/results are model output');
+  for (const sel of ['.subagents-card', '.subagent-row', '.subagent-pill', '.pill-failed', '.subagent-preview']) assert.ok(css.includes(sel), sel);
+  const tasksJs = fs.readFileSync(path.join(renderer, 'control-centre/pages/tasks/tasks-page.js'), 'utf8');
+  assert.ok(/pf-task-result-text', \{ textContent: task\.result/.test(tasksJs));
+  for (const sel of ['.pf-task-filter', '.pf-task-result', '.pf-toggle', '.pf-memory-note']) assert.ok(css.includes(sel), sel);
+});

@@ -7,6 +7,12 @@ contextBridge.exposeInMainWorld('ccBridge', {
   setApiKey: (key) => ipcRenderer.send('set-api-key', key),
   getProviders: () => ipcRenderer.invoke('get-providers'),
   setAgentProvider: (agentId, provider) => ipcRenderer.invoke('set-agent-provider', agentId, provider),
+  // Orchestrator agents: delegate to sub-agents; their shared team memory
+  setAgentOrchestrator: (agentId, enabled) => ipcRenderer.invoke('set-agent-orchestrator', agentId, enabled),
+  getTeamMemory: (agentId) => ipcRenderer.invoke('get-team-memory', agentId),
+  deleteTeamMemory: (agentId, noteId) => ipcRenderer.invoke('delete-team-memory', agentId, noteId),
+  clearTeamMemory: (agentId) => ipcRenderer.invoke('clear-team-memory', agentId),
+  onTasksUpdated: (cb) => ipcRenderer.on('tasks-updated', () => cb()),
   listOllamaModels: (baseUrl) => ipcRenderer.invoke('list-ollama-models', baseUrl),
   addCustomModel: (model) => ipcRenderer.invoke('add-custom-model', model),
   removeCustomModel: (id) => ipcRenderer.invoke('remove-custom-model', id),

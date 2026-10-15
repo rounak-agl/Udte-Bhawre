@@ -215,3 +215,103 @@ test('markdown: no attribute breakout, only http(s)/mailto links', () => {
   assert.ok(good.includes('<a href="https://example.com/a?b=1&amp;c=2"') && good.includes('rel="noopener noreferrer"'));
   assert.ok(md.render('<img src=x onerror=alert(1)>').startsWith('&lt;img'));
 });
+
+test('a step outside the plan asks you; allowing it gets a newly signed plan, declining blocks it', async () => {
+  const McpClientManager = require(path.join(REPO, 'sessions/mcp-client.js'));
+  const mc = new McpClientManager();
+  const events = [];
+  mc.on('security:enforcement-block', b => events.push(['block', b.kind]));
+  mc.on('security:plan-extended', b => events.push(['extended', b.tool]));
+  const plan = new Set(['get_me']);
+  const extendCalls = [];
+  mc.guard = {
+    enabled: true,
+    _log() {},
+    extendPlan: async (tool) => { extendCalls.push(tool.name); plan.add(tool.name); return true; },
+    hooks: {
+      onToolExecution: async (name) => {
+        if (!plan.has(name)) throw Object.assign(new Error(`Intent drift: "${name}" not in approved plan`), { code: 'INTENT_DRIFT' });
+        return { allowed: true };
+      }
+    }
+  };
+  const prompts = [];
+  mc.setApprovalFunction(async (msg) => { prompts.push(msg); return true; });
+  const ran = await quiet(() => mc.executeToolCall('get_current_time', {}));
+  assert.ok(ran.success !== false && !ran.securityBlock, 'runs after approval');
+  assert.deepStrictEqual(extendCalls, ['get_current_time']);
+  assert.match(prompts[0], /wasn't in the plan ArmorIQ approved/);
+  assert.match(prompts[0], /may be trying to steer it/);
+  assert.doesNotMatch(prompts[0], /couldn't be reached/);
+
+  // Declined → blocked as drift, plan untouched
+  mc.setApprovalFunction(async () => false);
+  const declined = await quiet(() => mc.executeToolCall('get_system_info', {}));
+  assert.ok(declined.securityBlock);
+  assert.ok(!plan.has('get_system_info'));
+
+  // An expired approval isn't a missing step: no prompt, blocked
+  prompts.length = 0;
+  mc.setApprovalFunction(async (m) => { prompts.push(m); return true; });
+  mc.guard.hooks.onToolExecution = async () => { throw Object.assign(new Error('The approval for this message expired — send it again'), { code: 'INTENT_DRIFT' }); };
+  assert.ok((await quiet(() => mc.executeToolCall('get_current_time', {}))).securityBlock);
+  assert.strictEqual(prompts.length, 0);
+
+  assert.deepStrictEqual(events, [['extended', 'get_current_time'], ['block', 'drift'], ['block', 'drift']]);
+});
+
+test('an unplanned step the request calls for is added without asking — but risky tools still ask', async () => {
+  const McpClientManager = require(path.join(REPO, 'sessions/mcp-client.js'));
+  const mc = new McpClientManager();
+  const events = [];
+  mc.on('security:plan-extended', b => events.push([b.tool, b.by]));
+  const plan = new Set(['get_me']);
+  mc.guard = {
+    enabled: true, _log() {},
+    extendPlan: async (tool) => { plan.add(tool.name); return true; },
+    hooks: { onToolExecution: async (name) => {
+      if (!plan.has(name)) throw Object.assign(new Error(`Intent drift: "${name}"`), { code: 'INTENT_DRIFT' });
+      return { allowed: true };
+    } }
+  };
+  const reviewed = [];
+  mc.setStepReviewer(async (tool) => { reviewed.push(tool.name); return tool.name !== 'open_url'; });
+  const prompts = [];
+  mc.setApprovalFunction(async (msg) => { prompts.push(msg); return false; });
+
+  // Part of the request: added with no prompt
+  const r1 = await quiet(() => mc.executeToolCall('get_current_time', {}));
+  assert.ok(!r1.securityBlock && r1.success !== false);
+  assert.strictEqual(prompts.length, 0);
+
+  // Part of the request, but a tool that always asks (shell): the user is still asked
+  const r2 = await quiet(() => mc.executeToolCall('run_shell_command', { command: 'echo hi' }));
+  assert.strictEqual(prompts.length, 1, "the shell tool's own approval prompt still appears");
+  assert.doesNotMatch(prompts[0], /wasn't in the plan/);
+  assert.ok(r2.success === false || r2.securityBlock || !r2.stdout, 'declined at the tool prompt');
+
+  // Not part of the request: falls back to asking the user (who says no)
+  const r3 = await quiet(() => mc.executeToolCall('open_url', { url: 'https://evil.example' }));
+  assert.ok(r3.securityBlock);
+  assert.match(prompts.at(-1), /wasn't in the plan ArmorIQ approved/);
+
+  assert.deepStrictEqual(reviewed, ['get_current_time', 'run_shell_command', 'open_url']);
+  assert.deepStrictEqual(events, [['get_current_time', 'auto'], ['run_shell_command', 'auto']]);
+});
+
+test('guard.extendPlan asks ArmorIQ to sign the old plan plus the new step', async () => {
+  const guard = new ArmorIQGuard({ apiKey: 'x' });
+  guard.policy = { allow: [], deny: [] };
+  guard.enabled = true;
+  const captured = [];
+  guard.client = {
+    capturePlan: (llm, prompt, plan) => { captured.push(plan); return { plan }; },
+    getIntentToken: async (pc) => ({ tokenId: 't', planHash: 'h', signature: 's', expiresAt: Date.now() / 1000 + 300, rawToken: { plan: pc.plan } })
+  };
+  await quiet(() => guard.onLlmInput({ prompt: 'make a branch', tools: [{ name: 'get_me', description: 'who' }] }));
+  assert.strictEqual(await quiet(() => guard.extendPlan({ name: 'create_branch', description: 'branch' })), true);
+  assert.deepStrictEqual(captured.at(-1).steps.map(s => s.action), ['get_me', 'create_branch']);
+  assert.strictEqual(captured.at(-1).goal, 'make a branch', 'same goal: the user\'s request');
+  const ok = await quiet(() => guard.onToolExecution('create_branch', {}));
+  assert.deepStrictEqual(ok, { allowed: true }, 'verified against the newly signed token');
+});

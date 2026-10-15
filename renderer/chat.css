@@ -948,3 +948,89 @@ html, body {
   object-fit: cover;
   display: block;
 }
+
+/* ── Sub-agents card (orchestrator agents) ── */
+.subagents-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 2px 36px;
+  padding: 8px;
+  border: 1px solid var(--msg-border, var(--border-color));
+  border-radius: 12px;
+  background: var(--msg-bg, var(--surface));
+}
+.subagents-card.active { border-color: var(--accent); }
+.subagents-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px 2px;
+}
+.subagents-title { font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.subagents-cancel {
+  padding: 3px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font: 600 11px 'Archivo', sans-serif;
+  cursor: pointer;
+}
+.subagents-cancel:hover:not(:disabled) { color: var(--error); border-color: var(--error); }
+.subagents-cancel:disabled { opacity: 0.5; cursor: default; }
+.subagent-row { border-radius: 8px; }
+.subagent-row:hover { background: var(--hover); }
+.subagent-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.subagent-top:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
+.subagent-emoji { width: 18px; text-align: center; flex-shrink: 0; }
+.subagent-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.subagent-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.subagent-meta { font-size: 11px; color: var(--text-muted); }
+.subagent-pill {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  background: var(--hover);
+  color: var(--text-muted);
+}
+.pill-running { background: var(--accent-soft); color: var(--accent); animation: pulse 1.5s infinite; }
+.pill-done { color: var(--success); }
+.pill-failed { background: var(--error-bg); color: var(--error); }
+.subagent-preview {
+  margin: 0 6px 6px 32px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--hover);
+  color: var(--text-primary);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.subagent-summary { font-size: 12px; padding: 2px 4px; color: var(--text-primary); }
+.subagent-summary.status-failed { color: var(--error); }
+#input-field:disabled { opacity: 0.6; cursor: not-allowed; }

@@ -192,6 +192,56 @@ class McpClientManager extends EventEmitter {
   }
 
   /**
+   * Set how a step outside the signed plan is first reviewed: async (tool) => boolean,
+   * true when the user's request itself calls for it (VisionSession asks the model,
+   * from the conversation text only). Not set, or false → the user is asked.
+   */
+  setStepReviewer(fn) {
+    this._stepReviewer = fn;
+  }
+
+  /**
+   * A tool outside the signed plan. If the step reviewer finds the user's request calls
+   * for it, or the user allows it, ArmorIQ signs a plan that includes it and the call is
+   * re-checked against that plan.
+   * @returns {Promise<false|'auto'|'user'>} who approved it, or false (blocked)
+   */
+  async _askToExtendPlan(toolName, args, error) {
+    const guard = this.guard;
+    if (typeof guard?.extendPlan !== 'function') return false;
+    if (/expired/i.test(error.message || '')) return false; // a stale approval isn't a missing step
+    const declaration = this.getAllFunctionDeclarations().find(d => d.name === toolName);
+    const tool = { name: toolName, description: declaration?.description || toolName };
+
+    let approvedBy = false;
+    if (this._stepReviewer && await this._stepReviewer(tool).catch(() => false) === true) {
+      approvedBy = 'auto';
+    } else if (this._approvalFn && await this._approvalFn(
+      `It wants to use "${toolName}", which wasn't in the plan ArmorIQ approved for this request.\n\n` +
+      'That\'s normal when a task needs an extra step. But if it just read a web page, file, email or issue, ' +
+      'that content may be trying to steer it — only allow this if it matches what you asked for.\n\n' +
+      this._formatToolCall(toolName, args)
+    )) {
+      approvedBy = 'user';
+    }
+    guard._log?.('tool_call', approvedBy ? 'allow' : 'block', toolName, {
+      stage: 'plan-extension',
+      reason: approvedBy === 'auto' ? 'Step is part of the user\'s request (reviewed without tool output)'
+        : approvedBy === 'user' ? 'User approved a step outside the plan' : 'Step outside the plan was not approved'
+    });
+    if (!approvedBy) return false;
+    try {
+      if (!(await guard.extendPlan(tool))) return false;
+      await guard.hooks.onToolExecution(toolName, args); // verified against the new signed plan
+    } catch (err) {
+      console.warn(`[GATE] Extended plan did not verify ${toolName}:`, err.message);
+      return false;
+    }
+    this.emit('security:plan-extended', { tool: toolName, by: approvedBy, timestamp: Date.now() });
+    return approvedBy;
+  }
+
+  /**
    * Set the approval function for dangerous tool calls.
    * @param {function} fn - Async function(message) => boolean
    */
@@ -290,10 +340,18 @@ class McpClientManager extends EventEmitter {
           return { success: false, securityBlock: true, error: `Blocked by policy: ${rule}`, toolName };
         }
         if (error.code === 'INTENT_DRIFT') {
-          this.emit('security:enforcement-block', { tool: toolName, kind: 'drift', reason: error.message });
-          return { success: false, securityBlock: true, error: 'Blocked — not in the approved plan for this message', toolName };
-        }
-        if (error.code === 'GUARD_UNREACHABLE') {
+          // A step the plan didn't foresee. That's normal in multi-step work (the next
+          // step only becomes clear after the previous one) — but it's also what content
+          // injected through a tool result looks like. So the user decides; if they
+          // allow it, ArmorIQ signs an extended plan. No way to ask → blocked as before.
+          const extended = await this._askToExtendPlan(toolName, args, error);
+          if (!extended) {
+            this.emit('security:enforcement-block', { tool: toolName, kind: 'drift', reason: error.message });
+            return { success: false, securityBlock: true, error: 'Blocked — not in the approved plan for this message', toolName };
+          }
+          // Only a person's OK replaces the tool's own approval prompt (shell, file write…)
+          approvedByUser = extended === 'user';
+        } else if (error.code === 'GUARD_UNREACHABLE') {
           // ArmorIQ couldn't be reached (not a refusal): ask the user instead of blocking.
           // Local policy already passed (it runs before this). No prompt available → block.
           const approved = this._approvalFn
@@ -354,6 +412,11 @@ class McpClientManager extends EventEmitter {
 
   /** The Allow/Deny prompt text for a tool call that ArmorIQ couldn't verify. */
   _describeForApproval(toolName, args) {
+    return `ArmorIQ couldn't be reached to verify this action, so it needs your OK.\n\n${this._formatToolCall(toolName, args)}`;
+  }
+
+  /** "Tool: …\nArguments: …" for approval prompts (arguments capped). */
+  _formatToolCall(toolName, args) {
     let shown;
     try {
       shown = JSON.stringify(args ?? {}, null, 2);
@@ -361,7 +424,7 @@ class McpClientManager extends EventEmitter {
       shown = '(arguments could not be displayed)';
     }
     if (shown.length > 1200) shown = shown.slice(0, 1200) + '\n…';
-    return `ArmorIQ couldn't be reached to verify this action, so it needs your OK.\n\nTool: ${toolName}\nArguments:\n${shown}`;
+    return `Tool: ${toolName}\nArguments:\n${shown}`;
   }
 
   /**

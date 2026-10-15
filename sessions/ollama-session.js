@@ -1,5 +1,5 @@
 const EventEmitter = require('events');
-const { toChatMessages, userTurnText, promptWithImages } = require('./conversation-context');
+const { toChatMessages, userEntry, promptWithImages } = require('./conversation-context');
 
 const BASE_PROMPT = 'You are a helpful desktop assistant. Answer the user directly and concisely. Use markdown formatting.';
 
@@ -39,12 +39,12 @@ class OllamaSession extends EventEmitter {
     this.emit('sessionReady');
   }
 
-  async send(message, images = []) {
+  async send(message, images = [], opts = {}) {
     if (this.isBusy) {
       this.emit('error', 'Still processing the previous request. Please wait.');
       return;
     }
-    this.history.push({ role: 'user', text: userTurnText(message, images.length) });
+    this.history.push(userEntry(message, images.length, opts));
     this.isBusy = true;
     const abort = new AbortController();
     this._abort = abort;

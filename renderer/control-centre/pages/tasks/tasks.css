@@ -136,3 +136,50 @@
   border-radius: var(--pf-radius-md);
   margin-top: var(--pf-spacing-md);
 }
+
+/* Sub-agent tasks (from orchestrator agents) */
+.pf-task-filters {
+  display: flex;
+  gap: var(--pf-spacing-xs);
+  padding: 0 var(--pf-spacing-xl);
+}
+.pf-task-filter {
+  padding: 4px 12px;
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-full);
+  background: var(--pf-color-surface-secondary);
+  color: var(--pf-color-text-secondary);
+  font-family: var(--pf-font-body);
+  font-size: var(--pf-font-size-caption);
+  cursor: pointer;
+}
+.pf-task-filter.active {
+  background: var(--pf-color-accent-primary);
+  border-color: var(--pf-color-accent-primary);
+  color: var(--pf-color-surface-secondary);
+}
+.pf-kanban-column[data-status="failed"] .pf-kanban-col-title { color: var(--pf-color-danger); }
+.pf-task-subagent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-spacing-xs);
+  margin-top: var(--pf-spacing-sm);
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-muted);
+}
+.pf-task-error {
+  margin-top: var(--pf-spacing-xs);
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-danger);
+}
+.pf-task-result { margin-top: var(--pf-spacing-sm); font-size: var(--pf-font-size-caption); }
+.pf-task-result summary { cursor: pointer; color: var(--pf-color-text-secondary); font-weight: 600; }
+.pf-task-result-text {
+  margin-top: var(--pf-spacing-xs);
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--pf-color-text-primary);
+}

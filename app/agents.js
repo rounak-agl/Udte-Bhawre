@@ -38,7 +38,7 @@ async function loadLatestConversation(char) {
     const latest = await ChatSession.findOne({ agentId: char.agentId }).sort({ updatedAt: -1 });
     if (!latest || char.session) return; // nothing saved, or a session already started
     char.sessionId = latest._id;
-    char.restoredHistory = latest.toObject().messages.map(({ role, text, isTool, timestamp }) => ({ role, text, isTool, timestamp }));
+    char.restoredHistory = latest.toObject().messages.map(({ role, text, isTool, internal, timestamp }) => ({ role, text, isTool, internal, timestamp }));
     console.log(`[DB] Restored ${char.restoredHistory.length} messages for agent "${char.name}"`);
   } catch (err) {
     console.error('[DB] Failed to restore conversation:', err.message);
@@ -70,8 +70,12 @@ function launchAgentInstance(agentObj) {
   char.provider = agentObj.provider ? resolveProviderKey(agentObj.provider) : null;
   char.theme = agentObj.theme;
   char.toolsEnabled = agentObj.toolsEnabled !== false;
+  char.orchestrator = agentObj.orchestrator !== false;
   // Restore the agent's most recent conversation so it picks up where it left off
-  char.historyLoaded = loadLatestConversation(char);
+  char.historyLoaded = Promise.all([
+    loadLatestConversation(char),
+    char.refreshTeamMemory().catch(() => {})
+  ]);
 
   appEvents.emit('agents-changed');
 }

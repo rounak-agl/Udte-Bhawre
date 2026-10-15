@@ -67,7 +67,9 @@ test('memory: restored after restart, kept across close/reopen and settings chan
 test('agents: only valid, known fields are saved', async () => {
   const save = (cfg) => quiet(() => h.ipcHandle['save-agent'](CC(), cfg));
   assert.strictEqual(await save({ name: ' Buddy ', provider: 'claude', theme: 'Moss', contextFile: '' }), true);
-  assert.deepStrictEqual(h.db.agentsSaved.at(-1), { name: 'Buddy', provider: 'claude', theme: 'Moss', contextFile: '', toolsEnabled: true });
+  assert.deepStrictEqual(h.db.agentsSaved.at(-1), { name: 'Buddy', provider: 'claude', theme: 'Moss', contextFile: '', toolsEnabled: true, orchestrator: true });
+  assert.strictEqual(await save({ name: 'Solo', provider: 'claude', theme: 'Moss', orchestrator: false }), true);
+  assert.strictEqual(h.db.agentsSaved.at(-1).orchestrator, false, 'orchestrator can be turned off at creation');
   assert.strictEqual(await save({ name: 'x', provider: 'claude', theme: 'midnight' }), false);
   assert.strictEqual(await save({ name: 'x', provider: 'openai', theme: 'Moss' }), false);
   assert.strictEqual(await save({ name: 'y', provider: 'gemini', theme: 'Cloud' }), true, 'old Gemini CLI key is accepted…');

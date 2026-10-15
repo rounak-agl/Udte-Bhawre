@@ -89,7 +89,7 @@ test('Codex: images passed as --image files, deleted when the reply ends', () =>
   assert.match(args.at(-1), /describe$/);
   c.on('turnComplete', () => {});
   c.handleClose(0);
-  return sleep(50).then(() => assert.ok(files.every(f => !fs.existsSync(f)), 'temp images removed'));
+  assert.ok(files.every(f => !fs.existsSync(f)), 'temp images removed');
 });
 
 test('Ollama: images ride on the current user message only', async () => {

@@ -1,5 +1,5 @@
 const CliSession = require('./cli-session');
-const { buildTranscript, userTurnText, promptWithImages } = require('./conversation-context');
+const { buildTranscript, userEntry, promptWithImages } = require('./conversation-context');
 
 /**
  * Claude CLI — one long-running `claude -p` process with stream-json I/O.
@@ -32,16 +32,16 @@ class ClaudeSession extends CliSession {
     // Messages sent while the process was starting
     const pending = this.pendingMessages;
     this.pendingMessages = [];
-    for (const { message, images } of pending) this.writeMessage(message, images);
+    for (const { message, images, opts } of pending) this.writeMessage(message, images, opts);
   }
 
-  send(message, images = []) {
+  send(message, images = [], opts = {}) {
     if (!this.process) {
-      this.pendingMessages.push({ message, images });
+      this.pendingMessages.push({ message, images, opts });
       this.start();
       return;
     }
-    this.writeMessage(message, images);
+    this.writeMessage(message, images, opts);
   }
 
   terminate() {
@@ -70,10 +70,10 @@ class ClaudeSession extends CliSession {
     return args;
   }
 
-  writeMessage(message, images = []) {
+  writeMessage(message, images = [], opts = {}) {
     this.isBusy = true;
     this.currentResponseText = '';
-    this.history.push({ role: 'user', text: userTurnText(message, images.length) });
+    this.history.push(userEntry(message, images.length, opts));
     // Images go in as Anthropic image content blocks, before the text
     const content = images.length
       ? [

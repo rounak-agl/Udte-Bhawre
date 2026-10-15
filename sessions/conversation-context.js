@@ -37,8 +37,12 @@ function toGeminiContents(history, { maxMessages = 40 } = {}) {
   for (const m of chatTurns(history).slice(-maxMessages)) {
     const role = m.role === 'user' ? 'user' : 'model';
     const last = contents[contents.length - 1];
-    if (last && last.role === role) {
+    if (last && last.role === role && m.internal) {
+      last.parts.push({ text: m.text }); // its own part, so it can be told apart (app-sent)
+    } else if (last && last.role === role && !last.parts.some((p, i) => i > 0)) {
       last.parts[0].text += `\n\n${m.text}`;
+    } else if (last && last.role === role) {
+      last.parts.push({ text: m.text });
     } else {
       contents.push({ role, parts: [{ text: m.text }] });
     }
@@ -65,10 +69,20 @@ function userTurnText(message, imageCount = 0) {
   return message ? `${message}\n${note}` : note;
 }
 
+/**
+ * A user-side history entry. `internal` marks messages the app sent on the user's behalf
+ * (e.g. sub-agent results): they're model context, but the chat doesn't show them.
+ */
+function userEntry(message, imageCount = 0, { internal = false } = {}) {
+  const entry = { role: 'user', text: userTurnText(message, imageCount) };
+  if (internal) entry.internal = true;
+  return entry;
+}
+
 /** What to ask when the user sent only images. */
 function promptWithImages(message, imageCount = 0) {
   if (message || !imageCount) return message;
   return imageCount === 1 ? 'Take a look at this image.' : 'Take a look at these images.';
 }
 
-module.exports = { buildTranscript, toGeminiContents, toChatMessages, userTurnText, promptWithImages };
+module.exports = { buildTranscript, toGeminiContents, toChatMessages, userTurnText, userEntry, promptWithImages };

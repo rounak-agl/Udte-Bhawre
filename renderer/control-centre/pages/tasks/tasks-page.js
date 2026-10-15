@@ -13,8 +13,47 @@ function TasksPage() {
   header.appendChild(addBtn);
   container.appendChild(header);
 
+  // Tasks done by an orchestrator's sub-agents vs. the ones you added
+  let filter = 'all';
+  const filters = pfCreateElement('div', 'pf-task-filters', { role: 'tablist', 'aria-label': 'Show' });
+  [['all', 'All tasks'], ['subagent', 'Sub-agent tasks'], ['manual', 'My tasks']].forEach(([id, label]) => {
+    const chip = pfCreateElement('button', `pf-task-filter${id === filter ? ' active' : ''}`, { type: 'button', role: 'tab', textContent: label });
+    chip.setAttribute('aria-selected', String(id === filter));
+    chip.onclick = () => {
+      filter = id;
+      filters.querySelectorAll('.pf-task-filter').forEach(c => {
+        c.classList.toggle('active', c === chip);
+        c.setAttribute('aria-selected', String(c === chip));
+      });
+      renderBoard();
+    };
+    filters.appendChild(chip);
+  });
+  container.appendChild(filters);
+
   const board = pfCreateElement('div', 'pf-kanban-board');
   container.appendChild(board);
+
+  // Sub-agent progress updates arrive from the main process; one listener for the app,
+  // pointed at whichever Tasks page is showing
+  let reloadTimer = null;
+  window.__pfTasksReload = () => {
+    if (!container.isConnected) return;
+    clearTimeout(reloadTimer);
+    reloadTimer = setTimeout(loadTasks, 400);
+  };
+  if (!window.__pfTasksHooked && window.ccBridge?.onTasksUpdated) {
+    window.__pfTasksHooked = true;
+    window.ccBridge.onTasksUpdated(() => window.__pfTasksReload && window.__pfTasksReload());
+  }
+
+  const isSubagentTask = (t) => !!t.orchestratorRunId;
+  function formatDuration(task) {
+    if (!task.startedAt) return '';
+    const ms = new Date(task.finishedAt || Date.now()) - new Date(task.startedAt);
+    const s = Math.max(0, Math.round(ms / 1000));
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  }
 
   async function loadTasks() {
     if (window.ccBridge) {
@@ -33,11 +72,15 @@ function TasksPage() {
     const columnsData = [
       { id: 'todo', title: 'To Do' },
       { id: 'in-progress', title: 'In Progress' },
-      { id: 'done', title: 'Done' }
+      { id: 'done', title: 'Done' },
+      { id: 'failed', title: 'Failed' }
     ];
+    const visible = tasksList.filter(t => filter === 'all' || (filter === 'subagent') === isSubagentTask(t));
 
     columnsData.forEach(col => {
-      const colTasks = tasksList.filter(t => t.status === col.id);
+      const colTasks = visible.filter(t => t.status === col.id);
+      // The Failed column only appears when something failed
+      if (col.id === 'failed' && !colTasks.length) return;
       
       const colEl = pfCreateElement('div', 'pf-kanban-column');
       colEl.dataset.status = col.id;
@@ -60,6 +103,23 @@ function TasksPage() {
           if (task.description) {
             card.appendChild(pfCreateElement('div', 'pf-task-desc', { textContent: task.description }));
           }
+          if (isSubagentTask(task)) {
+            card.classList.add('pf-task-card--subagent');
+            const meta = pfCreateElement('div', 'pf-task-subagent-meta');
+            meta.appendChild(PFBadge({ label: `🧩 ${task.provider || 'sub-agent'}`, variant: 'secondary' }));
+            const via = task.agentId?.name ? `via ${task.agentId.name}` : 'sub-agent';
+            meta.appendChild(pfCreateElement('span', '', { textContent: [via, formatDuration(task)].filter(Boolean).join(' · ') }));
+            card.appendChild(meta);
+            if (task.error) card.appendChild(pfCreateElement('div', 'pf-task-error', { textContent: task.error }));
+            if (task.result) {
+              // Model output: text only
+              const result = pfCreateElement('details', 'pf-task-result');
+              result.appendChild(pfCreateElement('summary', '', { textContent: 'Result' }));
+              result.appendChild(pfCreateElement('div', 'pf-task-result-text', { textContent: task.result }));
+              result.addEventListener('click', (e) => e.stopPropagation());
+              card.appendChild(result);
+            }
+          }
 
           const cardFooter = pfCreateElement('div', 'pf-task-footer');
           if (task.agentId) {
@@ -79,7 +139,9 @@ function TasksPage() {
           cardFooter.appendChild(actions);
           card.appendChild(cardFooter);
 
-          card.onclick = () => showCreateTaskModal(task);
+          // Sub-agent tasks are a record of what ran; your own tasks open for editing
+          if (!isSubagentTask(task)) card.onclick = () => showCreateTaskModal(task);
+          else card.style.cursor = 'default';
           itemsEl.appendChild(card);
         });
       }

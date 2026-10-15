@@ -57,7 +57,7 @@ function createHarness() {
   });
 
   // ── In-memory fake of utils/db.js ──
-  const db = { chats: new Map(), agentsSaved: [], agentsDeleted: [], agentUpdates: [], taskUpdates: [], writes: 0, agentsInDb: [] };
+  const db = { chats: new Map(), agentsSaved: [], agentsDeleted: [], agentUpdates: [], taskUpdates: [], writes: 0, agentsInDb: [], tasks: new Map() };
   let nextId = 1;
   let clock = Date.now();
   class ChatSession {
@@ -104,7 +104,11 @@ function createHarness() {
       isDBConnected: () => true,
       ChatSession,
       Agent,
-      Task: { updateMany: async (q, u) => { db.taskUpdates.push([q, u]); } }
+      Task: {
+        updateMany: async (q, u) => { db.taskUpdates.push([q, u]); },
+        create: async (doc) => { const _id = `task${nextId++}`; db.tasks.set(_id, { ...doc, _id }); return { _id }; },
+        findByIdAndUpdate: async (id, u) => { if (db.tasks.has(id)) db.tasks.set(id, { ...db.tasks.get(id), ...u }); return db.tasks.get(id) || null; }
+      }
     }
   };
 

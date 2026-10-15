@@ -11,13 +11,25 @@ const PFMarkdown = {
       .replace(/'/g, '&#39;');
   },
 
+  hideProtocolBlocks(text) {
+    const block = (name) => new RegExp('```' + name + '\\b[ \\t]*(?:\\r?\\n)?([\\s\\S]*?)(?:\\r?\\n```|```|$)', 'g');
+    let out = String(text)
+      .replace(block('delegate'), '\n*📋 Handing this to sub-agents…*\n')
+      .replace(block('remember'), '\n*🧠 Saved to team memory*\n');
+    // An opening fence still being typed ("```dele…"): odd number of fences, at the end
+    if ((out.match(/```/g) || []).length % 2 === 1) out = out.replace(/```[a-z]{0,8}$/i, '');
+    return out.replace(/\n{3,}/g, '\n\n').trim();
+  },
+
   render(text) {
     if (!text) return '';
     
+    // 0. Orchestration protocol blocks (sessions/orchestration.js) aren't for people:
+    // show a short marker instead — also while the block is still streaming in
+    text = this.hideProtocolBlocks(text);
+
     // 1. Extract code blocks BEFORE escaping (so backticks survive)
     const codeBlocks = [];
-    // Strip bbox blocks entirely (vision legacy)
-    text = text.replace(/```bbox\s*\n?[\s\S]*?```/g, '');
     // Extract fenced code blocks
     text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
       const placeholder = `%%CODEBLOCK_${codeBlocks.length}%%`;

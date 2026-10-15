@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('assistant', {
   // images: [{ mimeType, data (base64) }] attached in the chat (📎 / paste / drop / 📷)
   sendMessage: (msg, images) => ipcRenderer.send('chat-send', msg, images),
   captureScreen: () => ipcRenderer.invoke('chat-capture-screen'), // → { ok, image } | { ok: false, error }
+  // Sub-agents of an orchestrator agent: live progress cards, and cancel
+  onSubagentsUpdate: (callback) => onChannel('subagents-update', callback),
+  cancelSubagents: () => ipcRenderer.send('chat-cancel-subagents'),
   onChatText: (callback) => onChannel('chat-text', callback),
   onChatError: (callback) => onChannel('chat-error', callback),
   onChatToolUse: (callback) => onChannel('chat-tool-use', (name, input) => callback(name, input)),
