@@ -8,13 +8,16 @@ const { seal, reveal, isSealed } = require('../utils/secret-store');
  * values. Secrets are held encrypted (utils/secret-store.js) and decrypted on read.
  */
 
-/** Copy of an MCP server map with every env value passed through fn (seal/reveal). */
+/**
+ * Copy of an MCP server map with every env value (local servers) and header value
+ * (hosted servers) passed through fn (seal/reveal) — both usually hold API tokens.
+ */
 function mapMcpEnv(servers, fn) {
+  const mapValues = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, fn(v)]));
   const out = {};
   for (const [id, cfg] of Object.entries(servers || {})) {
-    const env = {};
-    for (const [k, v] of Object.entries(cfg?.env || {})) env[k] = fn(v);
-    out[id] = { ...cfg, env };
+    out[id] = { ...cfg, env: mapValues(cfg?.env) };
+    if (cfg?.headers) out[id].headers = mapValues(cfg.headers);
   }
   return out;
 }
@@ -112,7 +115,7 @@ class SettingsStore {
     return count;
   }
 
-  // MCP server env values are typically API tokens (GitHub PAT, Figma, Notion…)
+  // MCP server env/header values are typically API tokens (GitHub PAT, Figma, Notion…)
   get mcpServers() { return mapMcpEnv(this._mcpServers, reveal); }
   set mcpServers(v) { this._mcpServers = mapMcpEnv(v, seal); this._save(); }
 }

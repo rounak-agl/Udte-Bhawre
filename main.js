@@ -7,7 +7,7 @@
  *   app/overlay.js         step-guide overlay + step panel
  *   app/control-centre.js  Control Centre window
  *   app/security.js        IPC gatekeeping, navigation guards, approval prompts
- *   app/ipc/*.js           IPC handlers, grouped by feature
+ *   app/ipc/*.js           IPC handlers, grouped by feature (marketplace.js: MCP Connectors)
  */
 const { app } = require('electron');
 
@@ -16,6 +16,11 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('disable-gpu');
   app.disableHardwareAcceleration();
 }
+
+// Node gives each resolved address only 250 ms to connect before moving on; on a slow or
+// distant link every attempt is abandoned and fetch() fails with ETIMEDOUT (seen with the
+// MCP Registry and hosted MCP servers that curl reaches fine). Give each attempt longer.
+require('net').setDefaultAutoSelectFamilyAttemptTimeout(2500);
 
 // Write/validate the ArmorIQ config and policy files before any session code loads
 const { runBootstrap } = require('./sessions/bootstrap');
@@ -33,6 +38,7 @@ const { registerAgentIpc } = require('./app/ipc/agents');
 const { registerDataIpc } = require('./app/ipc/data');
 const { registerProviderIpc } = require('./app/ipc/providers');
 const { registerSettingsIpc } = require('./app/ipc/settings');
+const { registerMarketplaceIpc } = require('./app/ipc/marketplace');
 const { migrateSecrets, getMongodbUri } = require('./sessions/agent-session');
 const { status: secretStatus } = require('./utils/secret-store');
 const { connectDB } = require('./utils/db');
@@ -44,6 +50,7 @@ registerAgentIpc();
 registerDataIpc();
 registerProviderIpc();
 registerSettingsIpc();
+registerMarketplaceIpc();
 registerOverlayIpc();
 registerControlCentreIpc();
 

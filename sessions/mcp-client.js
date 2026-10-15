@@ -10,25 +10,81 @@ const { ArmorIQGuard, loadArmorIQConfig } = require('./armoriq-guard');
 const serverPool = new Map(); // key → { ready: Promise<{ client, transport, tools }>, refs }
 
 function serverKey(name, config) {
+  if (config.type === 'http') return JSON.stringify([name, 'http', config.url, config.headers || {}]);
   return JSON.stringify([name, config.command, config.args || [], config.env || {}]);
 }
 
-/** Start an external MCP server over stdio and list its tools. */
-async function openExternalServer(name, config) {
+const START_TIMEOUT_MS = 120000; // npx/uvx download the server (and its dependencies) on first run
+
+function newClient(name) {
   const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
-  const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
-  const transport = new StdioClientTransport({
-    command: config.command,
-    args: config.args || [],
-    env: { ...process.env, ...(config.env || {}) }
-  });
-  const client = new Client(
+  return new Client(
     { name: `desktop-assistant-${name}`, version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
-  await client.connect(transport);
-  const toolList = await client.listTools();
-  return { client, transport, tools: toolList.tools || [] };
+}
+
+/** Connect, list tools, and close again if either step fails. */
+async function connectAndList(client, transport) {
+  try {
+    await client.connect(transport, { timeout: START_TIMEOUT_MS });
+    const toolList = await client.listTools(undefined, { timeout: START_TIMEOUT_MS });
+    return { client, transport, tools: toolList.tools || [] };
+  } catch (err) {
+    try { await client.close(); } catch (_) { /* already closed */ }
+    throw err;
+  }
+}
+
+/** Local server: a process speaking MCP over stdio. */
+async function openStdioServer(name, config) {
+  const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+  const { getProcessEnv } = require('../utils/shell-env');
+  const transport = new StdioClientTransport({
+    command: config.command,
+    args: config.args || [],
+    // getProcessEnv adds the usual bin folders (npx/uvx) that a GUI-launched app may lack
+    env: { ...getProcessEnv(), ...(config.env || {}) },
+    stderr: 'pipe'
+  });
+  // Keep the end of the server's stderr: when it fails to start, that's usually the reason
+  let stderrTail = '';
+  transport.stderr?.on('data', (chunk) => {
+    process.stderr.write(chunk);
+    stderrTail = (stderrTail + chunk.toString()).slice(-2000);
+  });
+  try {
+    return await connectAndList(newClient(name), transport);
+  } catch (err) {
+    if (stderrTail.trim()) err.serverOutput = stderrTail.trim();
+    throw err;
+  }
+}
+
+/**
+ * Hosted server over HTTP. Tries the current Streamable HTTP transport first, then
+ * the older SSE transport — unless the server rejected our credentials.
+ */
+async function openHttpServer(name, config) {
+  const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const { SSEClientTransport } = require('@modelcontextprotocol/sdk/client/sse.js');
+  const url = new URL(config.url);
+  const requestInit = { headers: { ...(config.headers || {}) } };
+  try {
+    return await connectAndList(newClient(name), new StreamableHTTPClientTransport(url, { requestInit }));
+  } catch (err) {
+    if (err.code === 401 || err.code === 403) throw err;
+    try {
+      return await connectAndList(newClient(name), new SSEClientTransport(url, { requestInit }));
+    } catch (_) {
+      throw err; // the Streamable HTTP error is the more useful one
+    }
+  }
+}
+
+/** Start (or connect to) an external MCP server and list its tools. */
+async function openExternalServer(name, config) {
+  return config.type === 'http' ? openHttpServer(name, config) : openStdioServer(name, config);
 }
 
 /** Use (or start) the shared server for this config. */
@@ -76,7 +132,7 @@ async function releaseServer(key, name) {
  *
  * Supports:
  *   1. Built-in tools (in-process, zero config)
- *   2. External MCP servers via stdio (future — pluggable via config)
+ *   2. External MCP servers: local (stdio) or hosted (HTTP), see Connectors
  */
 class McpClientManager extends EventEmitter {
   constructor() {

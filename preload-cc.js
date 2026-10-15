@@ -24,6 +24,13 @@ contextBridge.exposeInMainWorld('ccBridge', {
   setMongodbUri: (uri) => ipcRenderer.invoke('set-mongodb-uri', uri), // → { connected, error, keptPrevious }
   getMcpServers: () => ipcRenderer.invoke('get-mcp-servers'),
   setMcpServers: (servers) => ipcRenderer.send('set-mcp-servers', servers),
+  // Connectors → Marketplace (installs are built and test-started in the main process)
+  getMarketplaceCatalog: () => ipcRenderer.invoke('marketplace-catalog'),
+  searchMarketplace: (query, cursor) => ipcRenderer.invoke('marketplace-search', query, cursor), // → { ok, servers, nextCursor } | { ok: false, error }
+  installMcpServer: (request) => ipcRenderer.invoke('marketplace-install', request),          // → { ok, id, tools } | { ok: false, error, canForce }
+  testMcpServer: (idOrConfig) => ipcRenderer.invoke('mcp-test-server', idOrConfig),             // → { ok, tools } | { ok: false, error }
+  saveMcpServer: (request) => ipcRenderer.invoke('mcp-save-server', request),                  // { id, config, previousId }
+  uninstallMcpServer: (id) => ipcRenderer.invoke('mcp-uninstall', id),
   setProvider: (provider) => ipcRenderer.send('set-provider', provider),
   setTheme: (theme) => ipcRenderer.send('set-theme', theme),
   onProviderChange: (cb) => ipcRenderer.on('provider-change', (_, provider) => cb(provider)),

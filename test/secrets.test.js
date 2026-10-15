@@ -69,6 +69,13 @@ test('secrets decrypt transparently for the app', () => {
   assert.deepStrictEqual(secrets.status(), { encrypted: true, backend: 'kwallet6', platform: process.platform });
 });
 
+test('hosted MCP server headers (tokens) are encrypted too', () => {
+  s.setMcpServers({ gh: { type: 'http', url: 'https://api.githubcopilot.com/mcp/', headers: { Authorization: 'Bearer ghp_HEADERSECRET' }, env: {} } });
+  assert.ok(!raw().includes('ghp_HEADERSECRET'), 'header value stored encrypted');
+  assert.ok(raw().includes('https://api.githubcopilot.com/mcp/'), 'URL is not a secret');
+  assert.strictEqual(s.getMcpServers().gh.headers.Authorization, 'Bearer ghp_HEADERSECRET');
+});
+
 test('no keychain: encrypted values read as empty; new values fall back to plain text', async () => {
   keyringAvailable = false;
   assert.strictEqual(s.getApiKey(), '');

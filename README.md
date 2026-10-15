@@ -89,6 +89,19 @@ Keys are encrypted at rest with your OS keychain (Electron `safeStorage`).
 
 Desktop tools are protected by ArmorIQ. Add your key in **Control Centre → Settings → Security** and use **Test connection** to check it. Each chat shows the guard's live state as a badge: **Protected**, **Asking you** (ArmorIQ unreachable, so each action asks for Allow / Deny), **Guard error**, or **Guard off**. The `ARMORIQ_API_KEY` environment variable overrides the Settings key for development.
 
+### 🔌 Connectors (MCP Marketplace)
+
+Give agents new tools in **Control Centre → Connectors**:
+
+- **Marketplace** has about 30 featured servers (GitHub, Notion, Slack, Postgres, Playwright, Brave Search, Figma, …) and a search of the public [MCP Registry](https://registry.modelcontextprotocol.io). Registry results are marked *Unverified*, and the install dialog shows exactly what will run before you confirm.
+- **Install** asks only for what the server needs, such as an API key. It then starts the server once to check it works and lists its tools; servers that fail aren't saved unless you choose **Save anyway**.
+- **Installed** lets you **Test**, edit or remove each server.
+- **Add custom** takes a pasted config (Claude Desktop, Cursor, VS Code or README JSON) or a form. Arguments go one per row, env vars and headers as key/value rows.
+
+Local servers run with `npx` (needs [Node.js](https://nodejs.org)) or `uvx` (needs [uv](https://docs.astral.sh/uv/)). Hosted servers connect over HTTPS with a token; servers that only support OAuth sign-in aren't supported yet. Keys and tokens are encrypted at rest like the other API keys.
+
+Installed servers are used by agents on **Gemini Vision** with desktop tools (🔧) on, and their tool calls go through the ArmorIQ guard.
+
 ---
 
 ## 🧪 Running Tests
@@ -123,7 +136,7 @@ npm run build:win
 
 -   **Multi-Terminal Support**: Open multiple terminal sessions within the assistant chat.
 -   **Character Clones**: Launch multiple AI companions on your taskbar, each with unique roles.
--   **Model Context Protocol (MCP)**: Supports Model Context Protocol for deep system integration.
+-   **Model Context Protocol (MCP)**: One-click MCP server Marketplace plus custom servers (local or hosted).
 -   **Control Centre**: A centralized dashboard to manage agent settings, conversation history, and system configurations.
 -   **Security via ArmorIQ**: Integrated security observation to ensure model tool calls are safe and verified.
 
@@ -132,9 +145,9 @@ npm run build:win
 ## 📂 Project Structure
 
 -   `main.js` Electron entry point: startup order and app lifecycle.
--   `app/` Main-process modules: `character.js` (a bot's windows, bubble, walking and AI session), `agents.js` (launching/syncing bots), `tray.js`, `overlay.js` (step guides), `control-centre.js`, `security.js` (IPC gatekeeping, navigation guards, approval prompts), and `ipc/` (IPC handlers grouped by feature: chat, agents, data, providers, settings).
+-   `app/` Main-process modules: `character.js` (a bot's windows, bubble, walking and AI session), `agents.js` (launching/syncing bots), `tray.js`, `overlay.js` (step guides), `control-centre.js`, `security.js` (IPC gatekeeping, navigation guards, approval prompts, MCP config validation), and `ipc/` (IPC handlers grouped by feature: chat, agents, data, providers, settings, marketplace).
 -   `renderer/` UI components and pages (Control Centre, Chat, Character overlays).
--   `mcp-servers/` Built-in local MCP server for system tools.
+-   `mcp-servers/` Built-in desktop tools and the curated Connectors catalog (`catalog.js`).
 -   `utils/` Database utilities, taskbar geometry, and screen capture logic.
--   `sessions/` AI model sessions: `providers.js` (registry of all providers), `cli-session.js` (shared base for the Claude/Codex/Copilot CLIs), `vision-session.js` (Gemini API + tools), `ollama-session.js` (local models).
+-   `sessions/` AI model sessions: `providers.js` (registry of all providers), `cli-session.js` (shared base for the Claude/Codex/Copilot CLIs), `vision-session.js` (Gemini API + tools), `ollama-session.js` (local models), `mcp-client.js` (built-in + external MCP servers, local and hosted), `mcp-registry.js` (MCP Registry search).
 -   `test/` Automated tests (`npm test`).

@@ -63,3 +63,19 @@ test('removed Gemini CLI provider is gone from the UI and sessions', () => {
   const agentsJs = fs.readFileSync(path.join(renderer, 'control-centre/pages/agents/agents-page.js'), 'utf8');
   assert.ok(!/['"`]Gemini CLI['"`]/.test(agentsJs), 'no "Gemini CLI" option label');
 });
+
+test('Connectors: classes are styled, scripts load in order, registry data never hits innerHTML', () => {
+  const dir = path.join(renderer, 'control-centre/pages/connectors');
+  const files = ['paste-config.js', 'custom-server-modal.js', 'install-drawer.js', 'marketplace-view.js', 'installed-view.js', 'connectors-page.js'];
+  const js = files.map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('\n');
+  // Registry entries are untrusted: text only (PFButton's icon arg is a constant)
+  assert.ok(!/innerHTML|insertAdjacentHTML|outerHTML/.test(js), 'no HTML injection points');
+  const used = [...new Set([...js.matchAll(/['"`]((?:pf-(?:market|install|test|kv|connectors|installed|segment|paste|form|link-button|required)[\w-]*))/g)].map(m => m[1]))];
+  const missing = used.filter(c => !css.includes(`.${c}`));
+  assert.deepStrictEqual(missing, []);
+  const html = fs.readFileSync(path.join(renderer, 'control-centre/control-centre.html'), 'utf8');
+  const order = files.map(f => html.indexOf(`pages/connectors/${f}`));
+  assert.ok(order.every(i => i > 0), 'all connector scripts loaded');
+  assert.deepStrictEqual([...order].sort((a, b) => a - b), order, 'helpers load before the page');
+  assert.ok(html.indexOf('pages/connectors/connectors-page.js') < html.indexOf('core/boot.js'));
+});
