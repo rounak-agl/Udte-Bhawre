@@ -3,7 +3,7 @@ const EventEmitter = require('events');
 const os = require('os');
 const { findBinary, getProcessEnv } = require('../utils/shell-env');
 const { getProviderEnv } = require('./agent-session');
-const { buildTranscript } = require('./conversation-context');
+const { buildTranscript, userTurnText } = require('./conversation-context');
 
 /**
  * Base class for providers that run a command-line tool (Claude, Codex, Copilot).
@@ -62,9 +62,13 @@ class CliSession extends EventEmitter {
     this.emit('sessionReady');
   }
 
-  /** Per-message mode: a fresh process for each message. */
-  send(message) {
-    this.history.push({ role: 'user', text: message });
+  /**
+   * Per-message mode: a fresh process for each message.
+   * @param {Array<{mimeType: string, data: string}>} [images] base64 images (providers
+   *   whose registry entry has supportsImages)
+   */
+  send(message, images = []) {
+    this.history.push({ role: 'user', text: userTurnText(message, images.length) });
     this.isBusy = true;
     this.outputBuffer = '';
     this.killProcess();
@@ -72,11 +76,11 @@ class CliSession extends EventEmitter {
       this.isBusy = false;
       return;
     }
-    this.spawnProcess(this.buildArgs(message));
+    this.spawnProcess(this.buildArgs(message, images));
   }
 
   /** Arguments for one message (per-message providers implement this). */
-  buildArgs(message) { // eslint-disable-line no-unused-vars
+  buildArgs(message, images) { // eslint-disable-line no-unused-vars
     throw new Error(`${this.constructor.name} must implement buildArgs()`);
   }
 

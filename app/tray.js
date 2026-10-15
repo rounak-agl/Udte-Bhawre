@@ -112,7 +112,6 @@ function trayMenuTemplate() {
     {
       label: 'Quit',
       click: () => {
-        state.screenCapture.stop();
         characters.forEach(c => c.destroy());
         app.quit();
       }

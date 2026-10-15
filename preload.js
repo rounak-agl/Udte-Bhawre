@@ -27,7 +27,9 @@ contextBridge.exposeInMainWorld('assistant', {
   onProvidersChanged: (callback) => onChannel('providers-changed', callback),
   onGuardStatus: (callback) => onChannel('guard-status', callback),
   onChatCleared: (callback) => onChannel('chat-cleared', callback),
-  sendMessage: (msg) => ipcRenderer.send('chat-send', msg),
+  // images: [{ mimeType, data (base64) }] attached in the chat (📎 / paste / drop / 📷)
+  sendMessage: (msg, images) => ipcRenderer.send('chat-send', msg, images),
+  captureScreen: () => ipcRenderer.invoke('chat-capture-screen'), // → { ok, image } | { ok: false, error }
   onChatText: (callback) => onChannel('chat-text', callback),
   onChatError: (callback) => onChannel('chat-error', callback),
   onChatToolUse: (callback) => onChannel('chat-tool-use', (name, input) => callback(name, input)),
@@ -46,22 +48,6 @@ contextBridge.exposeInMainWorld('assistant', {
   // Bubble
   onBubbleShow: (callback) => onChannel('bubble-show', callback),
   onBubbleHide: (callback) => onChannel('bubble-hide', callback),
-
-  // Overlay — bounding box and step guides
-  onShowStepGuide: (callback) => onChannel('show-step-guide', callback),
-  onShowBoundingBox: (callback) => onChannel('show-bounding-box', callback),
-  onHideBoundingBox: (callback) => onChannel('hide-bounding-box', callback),
-  flyToElement: (element) => ipcRenderer.send('fly-to-element', element),
-  returnCharacter: () => ipcRenderer.send('return-character'),
-  hideOverlay: () => ipcRenderer.send('hide-overlay'),
-  onScreenDimensions: (callback) => onChannel('screen-dimensions', callback),
-  
-  // Step Panel
-  updateStepPanel: (data) => ipcRenderer.send('update-step-panel', data),
-  hideStepPanel: () => ipcRenderer.send('hide-step-panel'),
-  onStepPanelAction: (callback) => onChannel('step-panel-action', callback),
-  sendStepPanelAction: (action) => ipcRenderer.send('step-panel-action', action),
-  onUpdateStepPanelData: (callback) => onChannel('update-step-panel-data', callback),
 
   // ElevenLabs key (chat speech-to-text needs it in the renderer).
   // API-key setters and MCP server config are deliberately NOT exposed here: these

@@ -17,6 +17,10 @@ const providerNameEl = document.getElementById('provider-name');
 const providerDot = document.getElementById('provider-dot');
 const sessionStatusEl = document.getElementById('session-status');
 const btnTools = document.getElementById('btn-tools');
+const btnAttach = document.getElementById('btn-attach');
+const attachMenu = document.getElementById('attach-menu');
+const attachInput = document.getElementById('attach-input');
+const attachmentsEl = document.getElementById('attachments');
 const guardBadge = document.getElementById('guard-badge');
 
 let currentTheme = 'Peach';
@@ -39,9 +43,9 @@ const themeClasses = {
 // Provider list comes from main (built-ins + the user's local models) via 'chat-init';
 // this is only the fallback until it arrives.
 let providers = [
-  { key: 'vision', name: 'Gemini Vision', emoji: '👁', kind: 'builtin', supportsTools: true },
-  { key: 'claude', name: 'Claude', emoji: '✦', kind: 'builtin' },
-  { key: 'codex', name: 'Codex', emoji: '⚡', kind: 'builtin' },
+  { key: 'vision', name: 'Gemini Vision', emoji: '👁', kind: 'builtin', supportsTools: true, supportsImages: true },
+  { key: 'claude', name: 'Claude', emoji: '✦', kind: 'builtin', supportsImages: true },
+  { key: 'codex', name: 'Codex', emoji: '⚡', kind: 'builtin', supportsImages: true },
   { key: 'copilot', name: 'Copilot', emoji: '🤖', kind: 'builtin' }
 ];
 
@@ -93,6 +97,7 @@ function updateProviderUI() {
     el.classList.toggle('active', el.dataset.provider === currentProvider);
   });
   updateToolsUI();
+  updateAttachUI();
 }
 
 // ─── Tools toggle (per agent) ───
@@ -237,7 +242,7 @@ window.assistant.onChatInit((state) => {
 });
 
 // ─── Message rendering ───
-function addMessage(role, text) {
+function addMessage(role, text, images = []) {
   if (text === undefined || text === null) text = '';
   if (typeof text !== 'string') text = String(text);
 
@@ -258,7 +263,18 @@ function addMessage(role, text) {
     contentDiv.innerHTML = `<div class="error-title">${safeEscape(parsed.title)}</div>`
       + (parsed.reason ? `<div class="error-reason">${safeEscape(parsed.reason)}</div>` : '');
   } else {
-    contentDiv.textContent = text;
+    if (images.length) {
+      const strip = document.createElement('div');
+      strip.className = 'message-images';
+      images.forEach(img => {
+        const el = document.createElement('img');
+        el.src = img.url;
+        el.alt = 'Attached image';
+        strip.appendChild(el);
+      });
+      contentDiv.appendChild(strip);
+    }
+    if (text) contentDiv.appendChild(document.createTextNode(text));
   }
 
   msgDiv.appendChild(contentDiv);
@@ -489,20 +505,187 @@ function handleSlashCommand(cmd) {
   }
 }
 
+// ─── Attachments: screenshots and images for the next message ───
+// Nothing is captured or sent on its own: the user adds images (📎 menu, paste, drop),
+// sees them above the message box, and they go only with the message they send.
+const MAX_ATTACHMENTS = 4;
+const MAX_IMAGE_SIDE = 2048;
+let attachments = []; // { mimeType, data (base64), url (data: URL for display) }
+
+function supportsImages() {
+  return !!providerInfo(currentProvider).supportsImages;
+}
+
+function updateAttachUI() {
+  const ok = supportsImages();
+  btnAttach.disabled = !ok;
+  const label = ok
+    ? 'Attach a screenshot or image (or paste / drop one)'
+    : `${providerInfo(currentProvider).name} can't read images — switch provider in ⚙`;
+  btnAttach.title = label;
+  btnAttach.setAttribute('aria-label', label);
+  if (!ok) closeAttachMenu();
+}
+
+function flashStatus(text) {
+  sessionStatusEl.textContent = text;
+  setTimeout(() => { if (sessionStatusEl.textContent === text) sessionStatusEl.textContent = 'Ready'; }, 3000);
+}
+
+function renderAttachments() {
+  attachmentsEl.textContent = '';
+  attachmentsEl.hidden = attachments.length === 0;
+  attachments.forEach((a, i) => {
+    const item = document.createElement('div');
+    item.className = 'attachment';
+    const img = document.createElement('img');
+    img.src = a.url;
+    img.alt = `Attachment ${i + 1}`;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'attachment-remove';
+    remove.textContent = '✕';
+    remove.title = 'Remove';
+    remove.setAttribute('aria-label', `Remove attachment ${i + 1}`);
+    remove.addEventListener('click', () => { attachments.splice(i, 1); renderAttachments(); });
+    item.append(img, remove);
+    attachmentsEl.appendChild(item);
+  });
+}
+
+function addAttachment(mimeType, data) {
+  if (attachments.length >= MAX_ATTACHMENTS) {
+    flashStatus(`Up to ${MAX_ATTACHMENTS} images per message`);
+    return;
+  }
+  attachments.push({ mimeType, data, url: `data:${mimeType};base64,${data}` });
+  renderAttachments();
+}
+
+/** Any image the browser can decode → JPEG, at most 2048 px on its longest side. */
+async function imageFileToAttachment(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff'; // transparent areas would turn black in a JPEG
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+  return dataUrl.slice(dataUrl.indexOf(',') + 1);
+}
+
+async function addImageFiles(files) {
+  const images = [...files].filter(f => f && f.type && f.type.startsWith('image/'));
+  if (!images.length) return;
+  if (!supportsImages()) {
+    flashStatus(`${providerInfo(currentProvider).name} can't read images`);
+    return;
+  }
+  for (const file of images) {
+    try {
+      addAttachment('image/jpeg', await imageFileToAttachment(file));
+    } catch (_) {
+      flashStatus(`Couldn't read ${file.name || 'that image'}`);
+    }
+  }
+}
+
+function closeAttachMenu() {
+  attachMenu.hidden = true;
+  btnAttach.setAttribute('aria-expanded', 'false');
+}
+
+btnAttach.addEventListener('click', () => {
+  if (btnAttach.disabled) return;
+  const open = attachMenu.hidden;
+  attachMenu.hidden = !open;
+  btnAttach.setAttribute('aria-expanded', String(open));
+  if (open) attachMenu.querySelector('button').focus();
+});
+document.addEventListener('mousedown', (e) => {
+  if (!attachMenu.hidden && !e.target.closest('#attach-wrap')) closeAttachMenu();
+});
+attachMenu.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeAttachMenu(); btnAttach.focus(); }
+});
+
+document.getElementById('attach-file').addEventListener('click', () => {
+  closeAttachMenu();
+  attachInput.click();
+});
+attachInput.addEventListener('change', async () => {
+  await addImageFiles(attachInput.files);
+  attachInput.value = '';
+  inputField.focus();
+});
+
+document.getElementById('attach-screenshot').addEventListener('click', async () => {
+  closeAttachMenu();
+  if (attachments.length >= MAX_ATTACHMENTS) return flashStatus(`Up to ${MAX_ATTACHMENTS} images per message`);
+  sessionStatusEl.textContent = 'Taking screenshot…';
+  // The chat window hides itself while the screen is captured, then comes back
+  const res = await window.assistant.captureScreen();
+  if (res && res.ok) {
+    addAttachment(res.image.mimeType, res.image.data);
+    sessionStatusEl.textContent = 'Ready';
+  } else {
+    flashStatus(res?.error || 'Screenshot failed');
+  }
+  inputField.focus();
+});
+
+// Paste an image (e.g. a screenshot copied with the system's own tool)
+inputField.addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (!files.length) return;
+  e.preventDefault();
+  addImageFiles(files);
+});
+
+// Drag and drop images onto the chat
+container.addEventListener('dragover', (e) => {
+  if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+  e.preventDefault();
+  container.classList.add('drop-target');
+});
+container.addEventListener('dragleave', (e) => {
+  if (!container.contains(e.relatedTarget)) container.classList.remove('drop-target');
+});
+container.addEventListener('drop', (e) => {
+  container.classList.remove('drop-target');
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault();
+  addImageFiles(e.dataTransfer.files);
+});
+
 // ─── Send message ───
 function sendMessage() {
   const text = inputField.value.trim();
-  if (!text) return;
+  if (!text && !attachments.length) return;
+
+  if (text.startsWith('/') && !attachments.length) {
+    inputField.value = '';
+    inputField.style.height = 'auto';
+    if (handleSlashCommand(text)) return;
+  }
+  if (attachments.length && !supportsImages()) {
+    flashStatus(`${providerInfo(currentProvider).name} can't read images — remove them or switch provider`);
+    return;
+  }
+
+  const images = attachments;
+  attachments = [];
+  renderAttachments();
   inputField.value = '';
   inputField.style.height = 'auto'; // reset textarea height
 
-  if (text.startsWith('/')) {
-    if (handleSlashCommand(text)) return;
-  }
-
-  addMessage('user', text);
+  addMessage('user', text, images);
   showTypingIndicator();
-  window.assistant.sendMessage(text);
+  window.assistant.sendMessage(text, images.map(({ mimeType, data }) => ({ mimeType, data })));
 }
 
 // ─── Event listeners ───

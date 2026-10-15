@@ -1,12 +1,20 @@
 const EventEmitter = require('events');
-const { toChatMessages } = require('./conversation-context');
+const { toChatMessages, userTurnText, promptWithImages } = require('./conversation-context');
 
 const BASE_PROMPT = 'You are a helpful desktop assistant. Answer the user directly and concisely. Use markdown formatting.';
+
+/** Put this turn's images (base64) on the last user message; vision models read them. */
+function withImages(messages, message, images) {
+  if (!images.length || !messages.length) return messages;
+  const last = messages[messages.length - 1];
+  return [...messages.slice(0, -1), { ...last, content: promptWithImages(message, images.length), images: images.map(i => i.data) }];
+}
 
 /**
  * A user-added local model served by Ollama (https://ollama.com), talking to its
  * HTTP API: POST {baseUrl}/api/chat with stream=true returns one JSON object per line
- * ({ message: { content }, done }). Text chat only — no desktop tools.
+ * ({ message: { content }, done }). No desktop tools; images work with vision models
+ * (llava, gemma3, llama3.2-vision…).
  *
  * Every request sends the persona and the recent conversation, so the model keeps
  * its memory across messages, chat reopenings and app restarts.
@@ -31,12 +39,12 @@ class OllamaSession extends EventEmitter {
     this.emit('sessionReady');
   }
 
-  async send(message) {
+  async send(message, images = []) {
     if (this.isBusy) {
       this.emit('error', 'Still processing the previous request. Please wait.');
       return;
     }
-    this.history.push({ role: 'user', text: message });
+    this.history.push({ role: 'user', text: userTurnText(message, images.length) });
     this.isBusy = true;
     const abort = new AbortController();
     this._abort = abort;
@@ -50,7 +58,7 @@ class OllamaSession extends EventEmitter {
         body: JSON.stringify({
           model: this.model,
           stream: true,
-          messages: [{ role: 'system', content: system }, ...toChatMessages(this.history)]
+          messages: [{ role: 'system', content: system }, ...withImages(toChatMessages(this.history), message, images)]
         }),
         signal: abort.signal
       });

@@ -55,4 +55,20 @@ function toChatMessages(history, { maxMessages = 40 } = {}) {
   return chatTurns(history).slice(-maxMessages).map(m => ({ role: m.role, content: m.text }));
 }
 
-module.exports = { buildTranscript, toGeminiContents, toChatMessages };
+/**
+ * The text kept in history (and saved to the database) for a user message with images:
+ * the images themselves aren't stored, so later turns and other providers see a note.
+ */
+function userTurnText(message, imageCount = 0) {
+  if (!imageCount) return message;
+  const note = `[📎 ${imageCount} image${imageCount === 1 ? '' : 's'} attached]`;
+  return message ? `${message}\n${note}` : note;
+}
+
+/** What to ask when the user sent only images. */
+function promptWithImages(message, imageCount = 0) {
+  if (message || !imageCount) return message;
+  return imageCount === 1 ? 'Take a look at this image.' : 'Take a look at these images.';
+}
+
+module.exports = { buildTranscript, toGeminiContents, toChatMessages, userTurnText, promptWithImages };

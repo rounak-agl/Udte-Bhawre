@@ -23,7 +23,7 @@ function fakeAi(reply = 'ok') {
 }
 
 test('tools off: no MCP/guard startup, no tools sent, honest prompt, persona included', async () => {
-  const v = new VisionSession(null, { toolsEnabled: false });
+  const v = new VisionSession({ toolsEnabled: false });
   v.systemPrompt = 'Speak like a pirate.';
   let initCalled = false;
   v.mcpClient.initialize = async () => { initCalled = true; };
@@ -35,14 +35,14 @@ test('tools off: no MCP/guard startup, no tools sent, honest prompt, persona inc
   const { config } = ai.calls[0];
   assert.strictEqual(initCalled, false);
   assert.strictEqual(config.tools, undefined);
-  assert.match(config.systemInstruction, /CANNOT see the user's screen/);
+  assert.match(config.systemInstruction, /can't see the user's screen on your own/);
   assert.ok(!/BOUNDING BOX/.test(config.systemInstruction));
   assert.ok(config.systemInstruction.includes('Speak like a pirate.'));
   assert.strictEqual(v.history.at(-1).text, 'ahoy');
 });
 
 test('send waits for MCP/guard startup before generating', async () => {
-  const v = new VisionSession(null, { toolsEnabled: true });
+  const v = new VisionSession({ toolsEnabled: true });
   let initDone = false;
   v.mcpClient.initialize = async () => { await sleep(200); initDone = true; };
   v.mcpClient.getAllFunctionDeclarations = () => [];
@@ -55,7 +55,7 @@ test('send waits for MCP/guard startup before generating', async () => {
 });
 
 test('a blocked tool ends the turn with no duplicate reply text or tool-result line', async () => {
-  const v = new VisionSession(null, { toolsEnabled: true });
+  const v = new VisionSession({ toolsEnabled: true });
   v.mcpClient.initialize = async () => {};
   v.mcpClient.getAllFunctionDeclarations = () => [{ name: 'compose_email', description: 'x', parameters: { type: 'OBJECT', properties: {} } }];
   v.mcpClient.createIntentPlan = async () => null;
@@ -82,7 +82,7 @@ test('a blocked tool ends the turn with no duplicate reply text or tool-result l
 });
 
 test('restored conversation becomes model context (alternating, user first)', async () => {
-  const v = new VisionSession(null, { toolsEnabled: false });
+  const v = new VisionSession({ toolsEnabled: false });
   v.mcpClient.initialize = async () => {};
   v.on('error', () => {});
   v.restoreContext([

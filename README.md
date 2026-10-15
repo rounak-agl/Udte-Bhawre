@@ -85,6 +85,17 @@ Every agent has its own provider. Change it on the **Agents** page, from the age
 
 Keys are encrypted at rest with your OS keychain (Electron `safeStorage`).
 
+### 🖼 Screenshots and images
+
+The app never looks at your screen on its own. To show an agent something, use the 📎 button next to the message box:
+
+- **📷 Take a screenshot.** The chat steps aside, captures the screen once, and adds the shot to your message.
+- **🖼 Image from file…**, or paste or drag an image into the chat.
+
+Attachments appear above the message box, where you can remove them, and are sent only with the next message (up to 4). Images work with Gemini Vision, Claude, Codex and local Ollama vision models such as `llava` or `gemma3`. Copilot is text-only.
+
+Images are sent to the agent's provider (Google, Anthropic, OpenAI, or your local Ollama), but they're never saved: the chat history records "📎 image attached" instead. On Linux the screenshot uses your desktop's tool (`spectacle`, `gnome-screenshot`, `grim` or `scrot`).
+
 ### 🛡 ArmorIQ guard
 
 Desktop tools are protected by ArmorIQ. Add your key in **Control Centre → Settings → Security** and use **Test connection** to check it. Each chat shows the guard's live state as a badge: **Protected**, **Asking you** (ArmorIQ unreachable, so each action asks for Allow / Deny), **Guard error**, or **Guard off**. The `ARMORIQ_API_KEY` environment variable overrides the Settings key for development.
@@ -145,9 +156,9 @@ npm run build:win
 ## 📂 Project Structure
 
 -   `main.js` Electron entry point: startup order and app lifecycle.
--   `app/` Main-process modules: `character.js` (a bot's windows, bubble, walking and AI session), `agents.js` (launching/syncing bots), `tray.js`, `overlay.js` (step guides), `control-centre.js`, `security.js` (IPC gatekeeping, navigation guards, approval prompts, MCP config validation), and `ipc/` (IPC handlers grouped by feature: chat, agents, data, providers, settings, marketplace).
--   `renderer/` UI components and pages (Control Centre, Chat, Character overlays).
+-   `app/` Main-process modules: `character.js` (a bot's windows, bubble, walking and AI session), `agents.js` (launching/syncing bots), `tray.js`, `control-centre.js`, `security.js` (IPC gatekeeping, navigation guards, approval prompts, MCP config validation), and `ipc/` (IPC handlers grouped by feature: chat, agents, data, providers, settings, marketplace).
+-   `renderer/` UI components and pages (Control Centre, Chat, the walking characters).
 -   `mcp-servers/` Built-in desktop tools and the curated Connectors catalog (`catalog.js`).
--   `utils/` Database utilities, taskbar geometry, and screen capture logic.
+-   `utils/` Database utilities, taskbar geometry, and the on-demand screenshot for 📷 in chat (`screenshot.js`).
 -   `sessions/` AI model sessions: `providers.js` (registry of all providers), `cli-session.js` (shared base for the Claude/Codex/Copilot CLIs), `vision-session.js` (Gemini API + tools), `ollama-session.js` (local models), `mcp-client.js` (built-in + external MCP servers, local and hosted), `mcp-registry.js` (MCP Registry search).
 -   `test/` Automated tests (`npm test`).

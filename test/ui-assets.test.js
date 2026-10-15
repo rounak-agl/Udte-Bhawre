@@ -79,3 +79,16 @@ test('Connectors: classes are styled, scripts load in order, registry data never
   assert.deepStrictEqual([...order].sort((a, b) => a - b), order, 'helpers load before the page');
   assert.ok(html.indexOf('pages/connectors/connectors-page.js') < html.indexOf('core/boot.js'));
 });
+
+test('chat attachments: 📎 menu in the input area, styled, images rendered without innerHTML', () => {
+  const html = fs.readFileSync(path.join(renderer, 'chat.html'), 'utf8');
+  const inputArea = html.slice(html.indexOf('id="input-area"'), html.indexOf('id="btn-send"'));
+  for (const id of ['btn-attach', 'attach-menu', 'attach-screenshot', 'attach-file', 'attach-input']) assert.ok(inputArea.includes(`id="${id}"`), id);
+  assert.ok(html.indexOf('id="attachments"') < html.indexOf('id="input-area"'), 'preview strip above the input');
+  for (const sel of ['#btn-attach', '#attach-menu', '#attachments', '.attachment-remove', '.message-images', '.drop-target']) assert.ok(css.includes(sel), sel);
+  const chatJs = fs.readFileSync(path.join(renderer, 'chat.js'), 'utf8');
+  const attach = chatJs.slice(chatJs.indexOf('// ─── Attachments'), chatJs.indexOf('// ─── Send message'));
+  assert.ok(!attach.includes('innerHTML'));
+  const add = chatJs.slice(chatJs.indexOf('function addMessage'), chatJs.indexOf('function addToolMessage'));
+  assert.ok(add.includes("strip.className = 'message-images'") && add.includes('createTextNode(text)'), 'user text stays text');
+});

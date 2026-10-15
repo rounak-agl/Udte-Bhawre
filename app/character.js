@@ -1,10 +1,9 @@
-const { BrowserWindow, screen } = require('electron');
+const { BrowserWindow } = require('electron');
 const path = require('path');
 const state = require('./state');
 const { rendererFile, webPreferences } = require('./paths');
 const { providerFor } = require('./provider-choice');
 const { approveToolCall, emitSecurityEventToUI } = require('./security');
-const { showStepGuide } = require('./overlay');
 const { getTaskbarGeometry } = require('../utils/taskbar');
 const { getCurrentTheme, getApiKey } = require('../sessions/agent-session');
 const { listProviders, createSession: createProviderSession } = require('../sessions/providers');
@@ -91,14 +90,6 @@ class Character {
     // Bubble
     this.thinkingInterval = null;
     this.bubbleTimeout = null;
-
-    // Flight animation
-    this.isFlying = false;
-    this.flyStartPos = null;
-    this.flyTargetPos = null;
-    this.flyStartTime = 0;
-    this.flyDuration = 500;
-    this.savedTaskbarPos = null;
 
     // Database linkage
     this.agentId = null;
@@ -252,7 +243,6 @@ class Character {
     this.setGuardState(null); // known again once the new session is ready
     // The registry knows every provider (built-in CLIs/APIs and user-added local models)
     this.session = createProviderSession(providerKey, {
-      screenCapture: state.screenCapture,
       toolsEnabled: this.toolsEnabled !== false
     });
 
@@ -328,9 +318,6 @@ class Character {
       }
     });
 
-
-    // Vision-specific: step guide event
-    this.session.on('stepGuide', (steps) => showStepGuide(this, steps));
 
     // Sessions with desktop tools ask the user before risky actions
     if (typeof this.session.setApprovalFunction === 'function') {
@@ -437,6 +424,7 @@ class Character {
           this.bubbleWindow = null;
         }
       }, 30000);
+      this.bubbleReleaseTimer.unref?.(); // never keeps the app alive on its own
     }
     if (this.bubbleTimeout) {
       clearTimeout(this.bubbleTimeout);
@@ -467,80 +455,9 @@ class Character {
     this.bubbleTimeout = setTimeout(() => this.hideBubble(), 3000);
   }
 
-  // ── Flight Animation ──
-  flyTo(normX, normY) {
-    if (!this.charWindow || this.charWindow.isDestroyed()) return;
-
-    // normX/normY are fractions of the overlay, which covers the primary display's full
-    // bounds — so map onto those bounds, including their offset on multi-monitor setups.
-    const { x: dx, y: dy, width: sw, height: sh } = screen.getPrimaryDisplay().bounds;
-    const bounds = this.charWindow.getBounds();
-
-    // Save current position for return (only once, if already flying between steps)
-    if (!this.savedTaskbarPos) this.savedTaskbarPos = { x: bounds.x, y: bounds.y };
-
-    // Target position (offset to be beside the element, not on top)
-    const targetX = Math.round(dx + normX * sw + (normX > 0.5 ? -80 : 40));
-    const targetY = Math.round(dy + normY * sh - 40);
-
-    this.flyStartPos = { x: bounds.x, y: bounds.y };
-    this.flyTargetPos = { x: targetX, y: targetY };
-    this.flyStartTime = Date.now();
-    this.flyDuration = 500;
-    this._flyPos = null;
-    this.isFlying = true;
-    this.isWalking = false;
-    this.isPaused = true;
-  }
-
-  returnToTaskbar() {
-    if (!this.savedTaskbarPos || !this.charWindow || this.charWindow.isDestroyed()) {
-      this.isFlying = false;
-      return;
-    }
-
-    const bounds = this.charWindow.getBounds();
-    this.flyStartPos = { x: bounds.x, y: bounds.y };
-    this.flyTargetPos = this.savedTaskbarPos;
-    this.flyStartTime = Date.now();
-    this.flyDuration = 400;
-    this._flyPos = null;
-    this.isFlying = true;
-    this.savedTaskbarPos = null;
-
-    // Resume walking after landing
-    setTimeout(() => {
-      this.isFlying = false;
-      this.isPaused = true;
-      this.pauseEndTime = Date.now() + 2000;
-    }, 500);
-  }
-
   // ── Walk Logic ──
   update(walkZone) {
     const now = Date.now();
-
-    // Handle flight animation
-    if (this.isFlying && this.flyStartPos && this.flyTargetPos) {
-      const elapsed = now - this.flyStartTime;
-      const t = Math.min(1, elapsed / this.flyDuration);
-      // Ease-out cubic
-      const ease = 1 - Math.pow(1 - t, 3);
-
-      const x = this.flyStartPos.x + (this.flyTargetPos.x - this.flyStartPos.x) * ease;
-      const y = this.flyStartPos.y + (this.flyTargetPos.y - this.flyStartPos.y) * ease;
-
-      // Hovering at the target (t = 1) doesn't need the window moved every tick
-      const pos = { x: Math.round(x), y: Math.round(y) };
-      if (this.charWindow && !this.charWindow.isDestroyed() &&
-          (!this._flyPos || this._flyPos.x !== pos.x || this._flyPos.y !== pos.y)) {
-        this._flyPos = pos;
-        this.charWindow.setBounds({ ...pos, width: 64, height: 80 });
-      }
-      this._lastPos = null; // re-apply the walk position once the flight is over
-
-      return; // Skip normal walk logic during flight
-    }
 
     if (this.isPaused) {
       if (now >= this.pauseEndTime) {

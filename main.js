@@ -4,7 +4,6 @@
  *   app/character.js       a bot: walking window, bubble, chat window, AI session
  *   app/agents.js          launching/syncing/removing bots, per-bot provider
  *   app/tray.js            tray icon + menu
- *   app/overlay.js         step-guide overlay + step panel
  *   app/control-centre.js  Control Centre window
  *   app/security.js        IPC gatekeeping, navigation guards, approval prompts
  *   app/ipc/*.js           IPC handlers, grouped by feature (marketplace.js: MCP Connectors)
@@ -31,7 +30,6 @@ const { installNavigationGuards } = require('./app/security');
 const { launchAgentInstance, syncAgentsWithDB } = require('./app/agents');
 const { startWalkLoop } = require('./app/character');
 const { setupTray, trayMenuTemplate } = require('./app/tray');
-const { destroyOverlay, registerOverlayIpc } = require('./app/overlay');
 const { openControlCentre, registerControlCentreIpc } = require('./app/control-centre');
 const { registerChatIpc } = require('./app/ipc/chat');
 const { registerAgentIpc } = require('./app/ipc/agents');
@@ -51,7 +49,6 @@ registerDataIpc();
 registerProviderIpc();
 registerSettingsIpc();
 registerMarketplaceIpc();
-registerOverlayIpc();
 registerControlCentreIpc();
 
 // ── Lifecycle ──
@@ -60,8 +57,6 @@ app.whenReady().then(async () => {
   const secrets = secretStatus();
   const migrated = migrateSecrets();
   console.log(`[Secrets] ${secrets.encrypted ? `Encrypted at rest (${secrets.backend || secrets.platform})` : '⚠️  No OS credential store — secrets stored unencrypted'}${migrated ? `; encrypted ${migrated} existing value(s)` : ''}`);
-
-  state.screenCapture.start();
 
   // Connect to the database and put its agents on the desktop
   try {
@@ -77,7 +72,6 @@ app.whenReady().then(async () => {
   openControlCentre('dashboard');
   setupTray();
   startWalkLoop();
-  // The step-guide overlay is created when a guide is first shown (app/overlay.js)
 });
 
 app.on('window-all-closed', () => {
@@ -86,10 +80,7 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   state.isQuitting = true;
-  // Stop screen capture and clear ALL screenshots
-  state.screenCapture.stop();
   state.characters.forEach(c => c.destroy());
-  destroyOverlay();
 });
 
 // Used by tests (test/main-harness.js drives the real main process through these)

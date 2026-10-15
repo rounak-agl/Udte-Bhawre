@@ -2,24 +2,19 @@ const { GoogleGenAI } = require('@google/genai');
 const EventEmitter = require('events');
 const McpClientManager = require('./mcp-client');
 const { getMcpServers } = require('./agent-session');
-const { toGeminiContents } = require('./conversation-context');
+const { toGeminiContents, userTurnText, promptWithImages } = require('./conversation-context');
 
 /**
  * Gemini Vision API Session with MCP Tool Support.
- * Uses @google/genai SDK for multimodal (text + screenshot) queries
+ * Uses @google/genai SDK for multimodal (text + images the user attaches) queries
  * with function calling for tool execution.
  */
 
-// Screenshots are off to save API quota. While off, the prompt must not claim the model
-// can see the screen, or it invents bounding boxes for UI it has never seen.
-// Flip this (and see utils/screen-capture.js) to re-enable screen-aware step guides.
-const SCREENSHOTS_ENABLED = false;
-
-const INTRO_WITH_SCREEN = `You are a helpful desktop assistant that can see the user's screen.
-When the user asks a question, analyze the screenshot provided and give a clear, concise answer.`;
-
-const INTRO_WITHOUT_SCREEN = `You are a helpful desktop assistant. You CANNOT see the user's screen.
-If a question depends on what is on screen, ask the user to describe it instead of guessing.`;
+// The model only sees images the user chose to attach (a 📷 screenshot or a picture);
+// nothing is captured automatically, so the prompt must not claim it can see the screen.
+const INTRO = `You are a helpful desktop assistant. You can't see the user's screen on your own.
+The user may attach a screenshot or other images to a message — when they do, use them to answer.
+If a question depends on what is on screen and no image is attached, ask the user to attach a screenshot (📷 button) or describe it, instead of guessing.`;
 
 const FORMATTING_RULES = `FORMATTING RULES:
 - Use markdown formatting in your responses
@@ -31,50 +26,37 @@ const TOOL_RULES = `TOOL USAGE:
 - When you use a tool, the result will be sent back to you. Use it to form your final response.
 - For simple questions that don't need tools, just answer directly.`;
 
-const BOUNDING_BOX_RULES = `BOUNDING BOX MODE:
-When the user asks "how to" do something on their screen (e.g., "how to create a pull request", 
-"how to open settings"), you MUST:
-1. Analyze the screenshot to identify the exact UI elements they need to interact with
-2. Provide step-by-step instructions
-3. For EACH step, include a JSON block with the bounding box of the UI element to interact with
-
-Format each step EXACTLY like this:
-Step 1: Click the "Terminal" menu item in the top menu bar
-\`\`\`bbox
-{"step":1,"instruction":"Click the Terminal menu item","element":[20, 250, 45, 310],"action":"click"}
-\`\`\`
-
-BOUNDING BOX COORDINATE RULES (CRITICAL):
-- You MUST use the native array format: [ymin, xmin, ymax, xmax]
-- Each coordinate MUST be an integer from 0 to 1000 representing the fraction of the screen resolution (e.g. 500 is the exact center of the screen).
-- 0,0 is the top-left corner. 1000,1000 is the bottom-right corner.
-- Do NOT use width/height or objects. You must use the [ymin, xmin, ymax, xmax] integer array format.
-- action = "click", "type", "scroll", "right-click", or "hover"
-
-If the screen doesn't show the relevant UI for the user's question, just answer with text normally.
-If you can see the relevant UI, ALWAYS include bounding boxes for interactive elements.`;
+// Images stay in the model's context for this many of the latest user turns that had
+// any; older ones become a text note (every request resends the whole context).
+const IMAGE_TURNS_KEPT = 3;
 
 /** Assemble the system instruction from what this session can actually do. */
-function buildSystemPrompt({ screenshots, tools, persona }) {
-  const sections = [
-    screenshots ? INTRO_WITH_SCREEN : INTRO_WITHOUT_SCREEN,
-    FORMATTING_RULES
-  ];
+function buildSystemPrompt({ tools, persona }) {
+  const sections = [INTRO, FORMATTING_RULES];
   if (tools) sections.push(TOOL_RULES);
-  if (screenshots) sections.push(BOUNDING_BOX_RULES);
   if (persona) sections.push(`AGENT INSTRUCTIONS (from this agent's context file):\n${persona}`);
   return sections.join('\n\n');
 }
 
+/** Replace the image parts of all but the latest IMAGE_TURNS_KEPT image turns with a note. */
+function trimOldImages(contents) {
+  let kept = 0;
+  for (let i = contents.length - 1; i >= 0; i--) {
+    const c = contents[i];
+    if (c.role !== 'user' || !c.parts.some(p => p.inlineData)) continue;
+    if (++kept <= IMAGE_TURNS_KEPT) continue;
+    const n = c.parts.filter(p => p.inlineData).length;
+    c.parts = [{ text: `[${n} image${n === 1 ? '' : 's'} shared earlier — no longer visible]` }, ...c.parts.filter(p => !p.inlineData)];
+  }
+}
+
 class VisionSession extends EventEmitter {
   /**
-   * @param {object} screenCapture - ScreenCapture service
    * @param {object} [options]
    * @param {boolean} [options.toolsEnabled=true] - expose built-in/MCP tools to the model
    */
-  constructor(screenCapture, options = {}) {
+  constructor(options = {}) {
     super();
-    this.screenCapture = screenCapture; // reference to ScreenCapture service
     this.toolsEnabled = options.toolsEnabled !== false;
     this.systemPrompt = ''; // agent persona, set by the owning Character before start()
     this.ai = null;
@@ -154,8 +136,12 @@ class VisionSession extends EventEmitter {
     this.mcpClient.setApprovalFunction(fn);
   }
 
-  /** Send a message with the latest screenshot */
-  async send(message) {
+  /**
+   * Send a message, with any images the user attached.
+   * @param {string} message
+   * @param {Array<{mimeType: string, data: string}>} [images] base64 images
+   */
+  async send(message, images = []) {
     if (this.isBusy) {
       this.emit('error', 'Still processing the previous request. Please wait.');
       return;
@@ -174,30 +160,18 @@ class VisionSession extends EventEmitter {
       return;
     }
 
-    this.history.push({ role: 'user', text: message });
+    this.history.push({ role: 'user', text: userTurnText(message, images.length) });
     this.isBusy = true;
     this.currentResponseText = '';
 
     try {
-      // Build the multimodal prompt parts
-      const parts = [];
-
-      // Add screenshot if enabled (off by default to save API limits — see SCREENSHOTS_ENABLED)
-      const screenshot = SCREENSHOTS_ENABLED && this.screenCapture ? await this.screenCapture.captureNow() : null;
-      if (screenshot) {
-        parts.push({
-          inlineData: {
-            mimeType: 'image/png',
-            data: screenshot.base64
-          }
-        });
-        parts.push({ text: `[Screenshot: ${screenshot.width}x${screenshot.height}]\n\n${message}` });
-      } else {
-        parts.push({ text: message });
-      }
-
-      // Add user message to conversation history
+      // Images first, then the text (Gemini's recommended order)
+      const parts = [
+        ...images.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.data } })),
+        { text: promptWithImages(message, images.length) }
+      ];
       this._conversationHistory.push({ role: 'user', parts });
+      trimOldImages(this._conversationHistory);
 
       // Get tool declarations (none when tools are disabled for this agent / globally)
       const functionDeclarations = this.toolsEnabled ? this.mcpClient.getAllFunctionDeclarations() : [];
@@ -216,12 +190,6 @@ class VisionSession extends EventEmitter {
       // Save completed response
       if (this.currentResponseText.trim()) {
         this.history.push({ role: 'assistant', text: this.currentResponseText.trim() });
-
-        // Parse all bounding boxes from the complete response
-        const steps = this._parseAllBoundingBoxes(this.currentResponseText);
-        if (steps.length > 0) {
-          this.emit('stepGuide', steps);
-        }
       }
 
       this.isBusy = false;
@@ -261,7 +229,6 @@ class VisionSession extends EventEmitter {
         config: {
           tools,
           systemInstruction: buildSystemPrompt({
-            screenshots: SCREENSHOTS_ENABLED,
             tools: !!tools,
             persona: this.systemPrompt
           })
@@ -392,53 +359,6 @@ class VisionSession extends EventEmitter {
     this._conversationHistory = [];
     // Shutdown MCP client
     this.mcpClient.shutdown().catch(() => { });
-  }
-
-  /** Parse all bounding box steps from the complete response */
-  _parseAllBoundingBoxes(text) {
-    const steps = [];
-    const bboxRegex = /```bbox\s*\n?([\s\S]*?)\n?```/g;
-    let match;
-
-    while ((match = bboxRegex.exec(text)) !== null) {
-      try {
-        const stepData = JSON.parse(match[1].trim());
-        let x, y, w, h;
-
-        if (Array.isArray(stepData.element) && stepData.element.length === 4) {
-          // Native Gemini spatial format: [ymin, xmin, ymax, xmax] (0-1000 scale)
-          const [ymin, xmin, ymax, xmax] = stepData.element;
-          y = ymin / 1000;
-          x = xmin / 1000;
-          h = (ymax - ymin) / 1000;
-          w = (xmax - xmin) / 1000;
-        } else if (stepData.element && typeof stepData.element.x === 'number') {
-          // Fallback legacy object format
-          x = stepData.element.x;
-          y = stepData.element.y;
-          w = stepData.element.width || 0.05;
-          h = stepData.element.height || 0.03;
-        } else {
-          continue;
-        }
-
-        steps.push({
-          step: stepData.step || steps.length + 1,
-          instruction: stepData.instruction || '',
-          element: {
-            x: Math.max(0, Math.min(1, x)),
-            y: Math.max(0, Math.min(1, y)),
-            width: Math.max(0.01, Math.min(1, w)),
-            height: Math.max(0.01, Math.min(1, h))
-          },
-          action: stepData.action || 'click'
-        });
-      } catch (e) {
-        // Invalid JSON in bbox block, skip
-      }
-    }
-
-    return steps;
   }
 }
 

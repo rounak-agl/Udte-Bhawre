@@ -15,11 +15,12 @@ const { normalizeBaseUrl } = require('./ollama-session');
 // Session classes are required lazily so listing providers stays cheap.
 const BUILTIN_PROVIDERS = [
   {
-    key: 'vision', name: 'Gemini Vision', emoji: '👁', supportsTools: true,
-    create: ({ screenCapture, toolsEnabled }) => new (require('./vision-session'))(screenCapture, { toolsEnabled })
+    key: 'vision', name: 'Gemini Vision', emoji: '👁', supportsTools: true, supportsImages: true,
+    create: ({ toolsEnabled }) => new (require('./vision-session'))({ toolsEnabled })
   },
-  { key: 'claude', name: 'Claude', emoji: '✦', create: () => new (require('./claude-session'))() },
-  { key: 'codex', name: 'Codex', emoji: '⚡', create: () => new (require('./codex-session'))() },
+  { key: 'claude', name: 'Claude', emoji: '✦', supportsImages: true, create: () => new (require('./claude-session'))() },
+  { key: 'codex', name: 'Codex', emoji: '⚡', supportsImages: true, create: () => new (require('./codex-session'))() },
+  // `copilot suggest` takes text only
   { key: 'copilot', name: 'Copilot', emoji: '🤖', create: () => new (require('./copilot-session'))() }
 ];
 
@@ -37,12 +38,13 @@ function resolveProviderKey(key) {
 /** Everything the UI needs to show a provider list. */
 function listProviders() {
   return [
-    ...BUILTIN_PROVIDERS.map(({ key, name, emoji, supportsTools }) => ({
-      key, name, emoji, kind: 'builtin', supportsTools: !!supportsTools
+    ...BUILTIN_PROVIDERS.map(({ key, name, emoji, supportsTools, supportsImages }) => ({
+      key, name, emoji, kind: 'builtin', supportsTools: !!supportsTools, supportsImages: !!supportsImages
     })),
+    // Images work with vision models (llava, gemma3…); others answer without them
     ...getCustomModels().map(m => ({
       key: CUSTOM_PREFIX + m.id, name: m.name, emoji: '🦙', kind: 'ollama',
-      supportsTools: false, model: m.model, baseUrl: m.baseUrl
+      supportsTools: false, supportsImages: true, model: m.model, baseUrl: m.baseUrl
     }))
   ];
 }

@@ -1,5 +1,5 @@
 const CliSession = require('./cli-session');
-const { buildTranscript } = require('./conversation-context');
+const { buildTranscript, userTurnText, promptWithImages } = require('./conversation-context');
 
 /**
  * Claude CLI — one long-running `claude -p` process with stream-json I/O.
@@ -32,16 +32,16 @@ class ClaudeSession extends CliSession {
     // Messages sent while the process was starting
     const pending = this.pendingMessages;
     this.pendingMessages = [];
-    for (const msg of pending) this.writeMessage(msg);
+    for (const { message, images } of pending) this.writeMessage(message, images);
   }
 
-  send(message) {
+  send(message, images = []) {
     if (!this.process) {
-      this.pendingMessages.push(message);
+      this.pendingMessages.push({ message, images });
       this.start();
       return;
     }
-    this.writeMessage(message);
+    this.writeMessage(message, images);
   }
 
   terminate() {
@@ -70,11 +70,18 @@ class ClaudeSession extends CliSession {
     return args;
   }
 
-  writeMessage(message) {
+  writeMessage(message, images = []) {
     this.isBusy = true;
     this.currentResponseText = '';
-    this.history.push({ role: 'user', text: message });
-    const line = JSON.stringify({ type: 'user', message: { role: 'user', content: message } }) + '\n';
+    this.history.push({ role: 'user', text: userTurnText(message, images.length) });
+    // Images go in as Anthropic image content blocks, before the text
+    const content = images.length
+      ? [
+        ...images.map(img => ({ type: 'image', source: { type: 'base64', media_type: img.mimeType, data: img.data } })),
+        { type: 'text', text: promptWithImages(message, images.length) }
+      ]
+      : message;
+    const line = JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
     try {
       this.process.stdin.write(line);
     } catch (e) {
