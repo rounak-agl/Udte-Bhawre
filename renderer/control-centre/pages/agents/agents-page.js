@@ -16,10 +16,22 @@ function AgentsPage() {
   const grid = pfCreateElement('div', 'pf-agents-grid');
   container.appendChild(grid);
 
+  // Agents currently on the desktop (launched), by id
+  let runningIds = new Set();
+  // Provider key → display name (built-ins + local models)
+  let providerNames = {};
+  const providerName = (key) => providerNames[key === 'gemini' ? 'vision' : (key || 'vision')] || key || 'Gemini Vision';
+
   async function loadAgents() {
     if (window.ccBridge) {
       try {
-        const agents = await window.ccBridge.getAgents();
+        const [agents, state, providers] = await Promise.all([
+          window.ccBridge.getAgents(),
+          window.ccBridge.getInitialState(),
+          window.ccBridge.getProviders()
+        ]);
+        runningIds = new Set((state?.agents || []).map(a => String(a.id)));
+        providerNames = Object.fromEntries((providers || []).map(p => [p.key, p.name]));
         renderAgents(agents || []);
       } catch (e) {
         renderAgents([]);
@@ -40,14 +52,14 @@ function AgentsPage() {
 
     agents.forEach(agent => {
       const card = pfCreateElement('div', 'pf-agent-card');
-      const isLaunched = false; // We could check characters in initial state, but for now just show launch
+      const isLaunched = runningIds.has(String(agent._id));
 
       const cardHeader = pfCreateElement('div', 'pf-agent-card-header');
       cardHeader.appendChild(PFAvatar({ initials: agent.name?.charAt(0) || '?', shape: 'square', size: 'lg' }));
       
       const info = pfCreateElement('div', 'pf-agent-info');
       info.appendChild(pfCreateElement('div', 'pf-agent-name', { textContent: agent.name }));
-      info.appendChild(pfCreateElement('div', 'pf-agent-role', { textContent: agent.provider || 'vision' }));
+      info.appendChild(pfCreateElement('div', 'pf-agent-role', { textContent: providerName(agent.provider) }));
       cardHeader.appendChild(info);
       
       const status = pfCreateElement('div', `pf-agent-status ${isLaunched ? 'active' : ''}`, 
@@ -63,7 +75,7 @@ function AgentsPage() {
         row.appendChild(pfCreateElement('span', 'pf-agent-detail-value', { textContent: val || '--' }));
         return row;
       };
-      details.appendChild(makeRow('Provider', PFUtils.capitalize(agent.provider || 'vision')));
+      details.appendChild(makeRow('Provider', providerName(agent.provider)));
       details.appendChild(makeRow('Theme', agent.theme || 'Midnight'));
       card.appendChild(details);
 
@@ -71,22 +83,25 @@ function AgentsPage() {
       
       const deleteBtn = window.PFButton({ label: 'Remove', variant: 'ghost', size: 'sm' });
       deleteBtn.onclick = async () => {
-        if (confirm(`Are you sure you want to remove ${agent.name}?`)) {
+        if (confirm(`Remove ${agent.name}? Its saved conversations will be deleted too. Its tasks are kept, unassigned.`)) {
            if (window.ccBridge) {
              const success = await window.ccBridge.deleteAgent(agent._id);
              if (success) {
                window.PFToast.show('Success', `${agent.name} removed.`);
                loadAgents();
+             } else {
+               window.PFToast.show('Error', `Could not remove ${agent.name}.`);
              }
            }
         }
       };
       actions.appendChild(deleteBtn);
 
-      const launchBtn = window.PFButton({ label: 'Launch', variant: 'primary', size: 'sm' });
+      const launchBtn = window.PFButton({ label: isLaunched ? 'Running' : 'Launch', variant: 'primary', size: 'sm', disabled: isLaunched });
       launchBtn.onclick = () => {
         if (window.ccBridge) window.ccBridge.launchAgent(agent);
         window.PFToast.show('Success', `Launching ${agent.name}...`);
+        setTimeout(loadAgents, 300); // refresh the RUNNING badge
       };
       actions.appendChild(launchBtn);
       card.appendChild(actions);
@@ -105,11 +120,37 @@ function AgentsPage() {
     const nameInput = window.PFInput({ label: 'Agent Name', placeholder: 'e.g. Buddy' });
     box.appendChild(nameInput);
     
-    const providerInput = window.PFInput({ label: 'Provider', value: 'vision' });
-    box.appendChild(providerInput);
+    // Selects, not free text: the database only accepts these exact values
+    const makeSelect = (label, options, selected) => {
+      const group = pfCreateElement('div', 'pf-form-group');
+      const id = `pf-select-${Math.random().toString(36).slice(2, 9)}`;
+      group.appendChild(pfCreateElement('label', 'pf-input-label', { textContent: label, for: id }));
+      const select = pfCreateElement('select', 'pf-input pf-select', { id });
+      options.forEach(([value, text]) => {
+        const opt = pfCreateElement('option', '', { value, textContent: text });
+        if (value === selected) opt.selected = true;
+        select.appendChild(opt);
+      });
+      group.appendChild(select);
+      return { group, select };
+    };
 
-    const themeInput = window.PFInput({ label: 'Theme (Peach, Midnight, Cloud, Moss)', value: 'Midnight' });
-    box.appendChild(themeInput);
+    // Built-ins + the user's local models, from the provider registry
+    const provider = makeSelect('Provider', [['vision', 'Gemini Vision']], 'vision');
+    box.appendChild(provider.group);
+    if (window.ccBridge) {
+      window.ccBridge.getProviders().then(list => {
+        provider.select.replaceChildren(...list.map(p => pfCreateElement('option', '', {
+          value: p.key,
+          textContent: p.kind === 'ollama' ? `${p.name} — local (${p.model})` : p.name
+        })));
+      }).catch(() => {});
+    }
+
+    const theme = makeSelect('Theme', [
+      ['Midnight', 'Midnight'], ['Peach', 'Peach'], ['Cloud', 'Cloud'], ['Moss', 'Moss']
+    ], 'Midnight');
+    box.appendChild(theme.group);
 
     const contextInput = window.PFInput({ label: 'Custom System Prompt (.md)', placeholder: '/path/to/prompt.md' });
     const browseBtn = window.PFButton({ label: 'Browse', variant: 'secondary', size: 'sm' });
@@ -128,10 +169,10 @@ function AgentsPage() {
     const saveBtn = window.PFButton({ label: 'Save Agent', variant: 'primary' });
     saveBtn.onclick = async () => {
       const config = {
-        name: nameInput.querySelector('input').value || 'New Agent',
-        provider: providerInput.querySelector('input').value || 'vision',
-        theme: themeInput.querySelector('input').value || 'Midnight',
-        contextFile: contextInput.querySelector('input').value || '',
+        name: nameInput.querySelector('input').value.trim() || 'New Agent',
+        provider: provider.select.value,
+        theme: theme.select.value,
+        contextFile: contextInput.querySelector('input').value.trim(),
       };
       if (window.ccBridge) {
         const success = await window.ccBridge.saveAgent(config);
@@ -140,7 +181,7 @@ function AgentsPage() {
           modal.remove();
           loadAgents();
         } else {
-          window.PFToast.show('Error', 'Failed to save agent');
+          window.PFToast.show('Error', 'Failed to save agent — is the database connected?');
         }
       }
     };

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, clipboard, dialog, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, dialog, shell } = require('electron');
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-transparent-visuals');
@@ -12,16 +12,16 @@ const { runBootstrap } = require('./sessions/bootstrap');
 // Run bootstrap before any agent classes or windows are initialized
 runBootstrap();
 
-const { getTaskbarGeometry, getCharacterY } = require('./utils/taskbar');
+const { getTaskbarGeometry } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
-const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getElevenLabsApiKey, setElevenLabsApiKey, getMongodbUri, setMongodbUri, getMcpServers, setMcpServers, API_KEY_PROVIDERS, apiKeyProviderFor, getAllProviderApiKeys, setProviderApiKey, migrateSecrets } = require('./sessions/agent-session');
+const { getCurrentProvider, setCurrentProvider, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getElevenLabsApiKey, setElevenLabsApiKey, getMongodbUri, setMongodbUri, getMcpServers, setMcpServers, API_KEY_PROVIDERS, apiKeyProviderFor, getAllProviderApiKeys, setProviderApiKey, migrateSecrets } = require('./sessions/agent-session');
 const { status: secretStatus } = require('./utils/secret-store');
 const { connectDB, isDBConnected, Agent, ChatSession, Task } = require('./utils/db');
-const ClaudeSession = require('./sessions/claude-session');
-const CodexSession = require('./sessions/codex-session');
-const CopilotSession = require('./sessions/copilot-session');
-const GeminiSession = require('./sessions/gemini-session');
-const VisionSession = require('./sessions/vision-session');
+const {
+  DEFAULT_PROVIDER, resolveProviderKey, listProviders, isKnownProvider,
+  createSession: createProviderSession, addCustomModel, removeCustomModel
+} = require('./sessions/providers');
+const { listOllamaModels } = require('./sessions/ollama-session');
 const ScreenCapture = require('./utils/screen-capture');
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -34,16 +34,47 @@ let overlayWindow = null;
 let isQuitting = false;
 const screenCapture = new ScreenCapture({ maxBuffer: 3 });
 
-let pendingEvents = [];
-let rendererReady = false;
 let stepGuideOwner = null; // the Character whose session produced the active step guide
 
-function emitSecurityEventToUI(type, data, charWindowOrMain) {
+/** The default provider for agents without their own (falls back if it was removed). */
+function defaultProviderKey() {
+  const stored = resolveProviderKey(getCurrentProvider());
+  return isKnownProvider(stored) ? stored : DEFAULT_PROVIDER;
+}
+
+/** The provider an agent actually uses: its own, else the default. */
+function providerFor(char) {
+  return char.provider ? resolveProviderKey(char.provider) : defaultProviderKey();
+}
+
+/** Ask the user before a desktop tool runs something risky (shell, file write, URL). */
+async function approveToolCall(message) {
+  const result = await dialog.showMessageBox({
+    type: 'question',
+    buttons: ['Allow', 'Deny'],
+    defaultId: 1,
+    title: 'Tool Approval Required',
+    message: 'The assistant wants to perform an action:',
+    detail: message,
+    cancelId: 1
+  });
+  return result.response === 0; // 0 = Allow
+}
+
+const MAX_PENDING_SECURITY_EVENTS = 50;
+
+/**
+ * Deliver a security banner to this agent's own chat window. If its chat isn't open
+ * (or hasn't finished loading), queue it on the agent and flush when that chat reports
+ * ready — never into another agent's chat.
+ */
+function emitSecurityEventToUI(type, data, char) {
   const event = { type, data, ts: Date.now() };
-  if (rendererReady && charWindowOrMain && !charWindowOrMain.isDestroyed()) {
-    charWindowOrMain.webContents.send('security-audit-event', event);
+  if (char.chatReady && char.chatWindow && !char.chatWindow.isDestroyed()) {
+    char.chatWindow.webContents.send('security-audit-event', event);
   } else {
-    pendingEvents.push(event);
+    char.pendingSecurityEvents.push(event);
+    if (char.pendingSecurityEvents.length > MAX_PENDING_SECURITY_EVENTS) char.pendingSecurityEvents.shift();
   }
 }
 
@@ -140,6 +171,10 @@ class Character {
     this.restoredHistory = null;      // last saved conversation, loaded at launch
     this.historyLoaded = Promise.resolve();
     this._saveChain = Promise.resolve();
+
+    // Security banners for this agent, held until its chat window is ready
+    this.chatReady = false;
+    this.pendingSecurityEvents = [];
 
 
     // Internal flags
@@ -242,7 +277,8 @@ class Character {
       // Initial state is applied silently (unlike 'provider-change', which announces a switch)
       this.chatWindow.webContents.send('chat-init', {
         theme: this.theme || getCurrentTheme(),
-        provider: this.provider || getCurrentProvider(),
+        provider: providerFor(this),
+        providers: listProviders(),
         toolsEnabled: this.toolsEnabled !== false
       });
 
@@ -254,6 +290,7 @@ class Character {
 
     this.chatWindow.on('closed', () => {
       this.chatWindow = null;
+      this.chatReady = false;
     });
   }
 
@@ -266,7 +303,7 @@ class Character {
    * (used when the saved conversation is deleted from the Control Centre).
    */
   createSession({ fresh = false } = {}) {
-    const providerKey = this.provider || getCurrentProvider();
+    const providerKey = providerFor(this);
     const carried = fresh ? [] : (this.session ? this.session.history : (this.restoredHistory || []));
     this.restoredHistory = null;
     if (this.session) {
@@ -279,16 +316,11 @@ class Character {
     }
     this.stopThinking();
 
-    const visionOptions = { toolsEnabled: this.toolsEnabled !== false };
-
-    switch (providerKey) {
-      case 'vision': this.session = new VisionSession(screenCapture, visionOptions); break;
-      case 'claude': this.session = new ClaudeSession(); break;
-      case 'codex': this.session = new CodexSession(); break;
-      case 'copilot': this.session = new CopilotSession(); break;
-      case 'gemini': this.session = new GeminiSession(); break;
-      default: this.session = new VisionSession(screenCapture, visionOptions); break;
-    }
+    // The registry knows every provider (built-in CLIs/APIs and user-added local models)
+    this.session = createProviderSession(providerKey, {
+      screenCapture,
+      toolsEnabled: this.toolsEnabled !== false
+    });
 
     // Agent persona/context file: applied before start so CLI providers get it at launch
     this.session.systemPrompt = this.loadSystemPrompt();
@@ -328,10 +360,10 @@ class Character {
     });
 
     // ── Security events (ArmorIQ) ──
-    this.session.on('security:intent-sealed', (data) => emitSecurityEventToUI('intent-sealed', data, this.chatWindow));
-    this.session.on('security:intent-failed', (data) => emitSecurityEventToUI('intent-failed', data, this.chatWindow));
-    this.session.on('security:tool-allowed', (data) => emitSecurityEventToUI('tool-allowed', data, this.chatWindow));
-    this.session.on('security:enforcement-block', (data) => emitSecurityEventToUI('enforcement-block', data, this.chatWindow));
+    this.session.on('security:intent-sealed', (data) => emitSecurityEventToUI('intent-sealed', data, this));
+    this.session.on('security:intent-failed', (data) => emitSecurityEventToUI('intent-failed', data, this));
+    this.session.on('security:tool-allowed', (data) => emitSecurityEventToUI('tool-allowed', data, this));
+    this.session.on('security:enforcement-block', (data) => emitSecurityEventToUI('enforcement-block', data, this));
 
     this.session.on('sessionReady', () => {
       if (this.chatWindow && !this.chatWindow.isDestroyed()) {
@@ -364,27 +396,12 @@ class Character {
       }
     });
 
-    // Start session (vision needs API key)
-    if (providerKey === 'vision') {
-      const apiKey = getApiKey();
-      // Set the tool approval function before starting
-      this.session.setApprovalFunction(async (message) => {
-        const result = await dialog.showMessageBox({
-          type: 'question',
-          buttons: ['Allow', 'Deny'],
-          defaultId: 1,
-          title: 'Tool Approval Required',
-          message: 'The assistant wants to perform an action:',
-          detail: message,
-          cancelId: 1
-        });
-        return result.response === 0; // 0 = Allow
-      });
-      this.session.start(apiKey);
-    } else {
-      this.session.start();
+    // Sessions with desktop tools ask the user before risky actions
+    if (typeof this.session.setApprovalFunction === 'function') {
+      this.session.setApprovalFunction(approveToolCall);
     }
-
+    // The Gemini key is only used by Gemini Vision; other sessions ignore the argument
+    this.session.start(getApiKey());
   }
 
   /**
@@ -820,8 +837,8 @@ function rebuildTrayMenu() {
   // Agents are restored from the DB before the tray exists; setupTray() builds the
   // menu once it does. Throwing here used to abort startup after the first agent.
   if (!tray) return;
-  const allProviders = getAllProviders();
-  const currentProviderKey = getCurrentProvider();
+  const allProviders = listProviders();
+  const currentProviderKey = defaultProviderKey();
   const currentThemeName = getCurrentTheme();
   const themes = ['Peach', 'Midnight', 'Cloud', 'Moss'];
 
@@ -853,7 +870,7 @@ function rebuildTrayMenu() {
           // Recreate open sessions with the new provider
           restartSessions(c => {
             if (c.chatWindow && !c.chatWindow.isDestroyed()) {
-              c.chatWindow.webContents.send('provider-change', c.provider || p.key);
+              c.chatWindow.webContents.send('provider-change', providerFor(c));
               // Clear any stale typing indicators
               c.chatWindow.webContents.send('chat-turn-complete');
             }
@@ -983,11 +1000,13 @@ ipcMain.on('character-clicked', (event) => {
   }
 });
 
+// A chat window finished loading: flush that agent's queued security banners to it
 ipcMain.on('renderer-ready', (event) => {
-  rendererReady = true;
-  const webContents = event.sender;
-  pendingEvents.forEach(e => webContents.send('security-audit-event', e));
-  pendingEvents = [];
+  const char = charForChatSender(event);
+  if (!char) return;
+  char.chatReady = true;
+  char.pendingSecurityEvents.forEach(e => event.sender.send('security-audit-event', e));
+  char.pendingSecurityEvents = [];
 });
 
 ipcMain.on('chat-minimize', (event) => {
@@ -1023,7 +1042,7 @@ function charForChatSender(event) {
 // The conversation carries over to the new provider.
 ipcMain.on('chat-set-provider', async (event, providerKey) => {
   const char = charForChatSender(event);
-  if (!char || !getAllProviders().some(p => p.key === providerKey)) return;
+  if (!char || !isKnownProvider(providerKey)) return;
 
   char.provider = providerKey;
   char.chatWindow.webContents.send('provider-change', providerKey);
@@ -1059,37 +1078,22 @@ ipcMain.on('chat-set-tools', async (event, enabled) => {
   }
 });
 
-ipcMain.on('copy-last-response', (event) => {
-  const char = characters.find(c =>
-    c.chatWindow && !c.chatWindow.isDestroyed() && c.chatWindow.webContents === event.sender
-  );
-  if (char && char.session) {
-    const lastAssistant = [...char.session.history].reverse().find(m => m.role === 'assistant');
-    if (lastAssistant) {
-      clipboard.writeText(lastAssistant.text);
-    }
-  }
-});
-
 ipcMain.handle('get-initial-state', () => {
   return {
-    provider: getCurrentProvider(),
+    provider: defaultProviderKey(),
+    providers: listProviders(),
     theme: getCurrentTheme(),
     user: { name: 'User', avatar: 'U' },
     agents: characters.map(c => ({
       id: c.agentId || c.name,
       name: c.name,
       color: c.color,
-      provider: c.provider || getCurrentProvider(),
+      provider: providerFor(c),
       status: c.session ? 'active' : 'idle',
       personality: '',
       role: ''
     }))
   };
-});
-
-ipcMain.on('request-position', (event) => {
-  // Initial position will be set by update loop
 });
 
 // ── MCP Servers IPC ──
@@ -1152,7 +1156,7 @@ ipcMain.on('set-provider-api-key', (event, provider, key) => {
   // Restart only the open sessions that use this key, so it applies right away.
   // The conversation carries over (see createSession).
   characters.forEach(c => {
-    if (!c.session || apiKeyProviderFor(c.provider || getCurrentProvider()) !== provider) return;
+    if (!c.session || apiKeyProviderFor(providerFor(c)) !== provider) return;
     if (c.chatWindow && !c.chatWindow.isDestroyed()) {
       c.chatWindow.webContents.send('api-key-changed');
     }
@@ -1176,14 +1180,102 @@ ipcMain.on('set-theme', (event, theme) => {
 
 ipcMain.on('set-provider', (event, providerKey) => {
   if (!requireControlCentre(event, 'set-provider')) return;
-  setCurrentProvider(providerKey);
+  if (!isKnownProvider(providerKey)) return;
+  setCurrentProvider(resolveProviderKey(providerKey));
   restartSessions(c => {
     if (c.chatWindow && !c.chatWindow.isDestroyed()) {
-      c.chatWindow.webContents.send('provider-change', c.provider || providerKey);
+      c.chatWindow.webContents.send('provider-change', providerFor(c));
       c.chatWindow.webContents.send('chat-turn-complete');
     }
   });
   rebuildTrayMenu();
+});
+
+// ── Providers & custom (Ollama) models ──
+ipcMain.handle('get-providers', () => listProviders());
+
+// Tell every open chat (⚙ menu) and the tray that the provider list changed
+function broadcastProvidersChanged() {
+  const providers = listProviders();
+  characters.forEach(c => {
+    if (c.chatWindow && !c.chatWindow.isDestroyed()) c.chatWindow.webContents.send('providers-changed', providers);
+  });
+  rebuildTrayMenu();
+}
+
+// Models pulled into an Ollama server, for the "Add model" picker
+ipcMain.handle('list-ollama-models', async (event, baseUrl) => {
+  if (!requireControlCentre(event, 'list-ollama-models')) return { ok: false, error: 'Not allowed' };
+  try {
+    return { ok: true, models: await listOllamaModels(baseUrl) };
+  } catch (err) {
+    const unreachable = err.cause?.code === 'ECONNREFUSED' || err.name === 'TimeoutError' || /fetch failed/i.test(err.message);
+    return { ok: false, error: unreachable ? 'Ollama isn\'t reachable at that address. Is it running? (ollama serve)' : err.message };
+  }
+});
+
+ipcMain.handle('add-custom-model', (event, input) => {
+  if (!requireControlCentre(event, 'add-custom-model')) return { ok: false, error: 'Not allowed' };
+  try {
+    const model = addCustomModel(input);
+    broadcastProvidersChanged();
+    return { ok: true, model };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('remove-custom-model', (event, id) => {
+  if (!requireControlCentre(event, 'remove-custom-model')) return false;
+  if (typeof id !== 'string' || !removeCustomModel(id)) return false;
+  // Agents using it now get a clear "model removed" message in their chat
+  characters.forEach(c => {
+    if (c.session && providerFor(c) === `ollama:${id}`) c.createSession();
+  });
+  broadcastProvidersChanged();
+  return true;
+});
+
+// ── Settings → Security & About (read-only) ──
+ipcMain.handle('get-security-overview', (event) => {
+  if (!requireControlCentre(event, 'get-security-overview')) return null;
+  const { loadArmorIQConfig } = require('./sessions/armoriq-guard');
+  const { builtinTools } = require('./mcp-servers/builtin-tools');
+  const fs = require('fs');
+  const os = require('os');
+  const policyPath = path.join(__dirname, 'armoriq.policy.json');
+  let policy = { allow: [], deny: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+    policy = { allow: parsed.allow || [], deny: parsed.deny || [] };
+  } catch (_) { /* shown as empty */ }
+  const armor = loadArmorIQConfig();
+  return {
+    guard: {
+      active: !!armor.apiKey,
+      keySource: process.env.ARMORIQ_API_KEY ? 'ARMORIQ_API_KEY environment variable' : path.join(os.homedir(), '.openclaw', 'openclaw.json')
+    },
+    policy: { ...policy, path: policyPath },
+    approvalTools: builtinTools.filter(t => t.requiresApproval).map(t => t.name),
+    tools: builtinTools.map(t => t.name),
+    fileAccess: `Your home folder (${os.homedir()}), excluding hidden files/folders and key files`,
+    secrets: secretStatus()
+  };
+});
+
+ipcMain.handle('get-app-info', () => {
+  const os = require('os');
+  return {
+    name: 'Desktop Assistant',
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    node: process.versions.node,
+    chrome: process.versions.chrome,
+    platform: `${process.platform} ${process.arch}`,
+    settingsFile: path.join(os.homedir(), '.desktop-assistant-settings.json'),
+    policyFile: path.join(__dirname, 'armoriq.policy.json'),
+    database: isDBConnected() ? 'Connected' : 'Not connected'
+  };
 });
 
 ipcMain.on('set-eleven-labs-api-key', (event, key) => {
@@ -1336,12 +1428,30 @@ ipcMain.handle('get-agents', async () => {
   }
 });
 
+const AGENT_THEMES = ['Peach', 'Midnight', 'Cloud', 'Moss'];
+
 ipcMain.handle('save-agent', async (event, config) => {
   if (!requireControlCentre(event, 'save-agent')) return false;
   if (!isDBConnected()) return false;
+  if (!config || typeof config !== 'object') return false;
+
+  // Only known fields, with values the app can actually use (the form uses selects,
+  // but never trust the renderer — e.g. an unknown provider silently became Vision)
+  const name = typeof config.name === 'string' ? config.name.trim().slice(0, 60) : '';
+  const provider = isKnownProvider(config.provider) ? resolveProviderKey(config.provider) : null;
+  const theme = AGENT_THEMES.includes(config.theme) ? config.theme : null;
+  if (!name || !provider || !theme) {
+    console.warn('[DB] save-agent rejected: invalid name/provider/theme');
+    return false;
+  }
   try {
-    const newAgent = new Agent(config);
-    await newAgent.save();
+    await new Agent({
+      name,
+      provider,
+      theme,
+      contextFile: typeof config.contextFile === 'string' ? config.contextFile.trim() : '',
+      toolsEnabled: config.toolsEnabled !== false
+    }).save();
     return true;
   } catch (err) {
     console.error('[DB] save-agent error:', err.message);
@@ -1407,7 +1517,7 @@ function launchAgentInstance(agentObj) {
   // Set provider for this session
   // Since multiple agents can have different providers, we don't use global state here
   // The Character instance needs its own provider handle
-  char.provider = agentObj.provider;
+  char.provider = agentObj.provider ? resolveProviderKey(agentObj.provider) : null;
   char.theme = agentObj.theme;
   char.toolsEnabled = agentObj.toolsEnabled !== false;
   // Restore the agent's most recent conversation so it picks up where it left off
@@ -1550,8 +1660,12 @@ ipcMain.handle('delete-agent', async (event, id) => {
       rebuildTrayMenu();
     }
 
-    // 2. Delete from Database
+    // 2. Delete from Database, with the agent's data: its conversations go too,
+    //    while its tasks are kept but unassigned (they're the user's to-dos).
     await Agent.findByIdAndDelete(id);
+    await ChatSession.deleteMany({ agentId: id });
+    await Task.updateMany({ agentId: id }, { $unset: { agentId: 1 } });
+    BrowserWindow.getAllWindows().forEach(w => w.webContents.send('history-updated'));
     return true;
   } catch (err) {
     console.error('[DB] delete-agent error:', err.message);

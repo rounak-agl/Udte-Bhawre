@@ -12,7 +12,7 @@ function ConnectorsPage() {
   header.appendChild(addBtn);
   container.appendChild(header);
 
-  // Sync with renderer/settings.js DEFAULT_INTEGRATIONS
+  // Built-in MCP connector presets
   const defaultConnectors = [
     { 
       id: 'photoshop', 

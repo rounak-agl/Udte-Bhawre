@@ -63,30 +63,6 @@ class ScreenCapture {
     console.log('[ScreenCapture] Stopped, all screenshots cleared');
   }
 
-  /** Get the most recent screenshot as base64 PNG */
-  getLatest() {
-    if (this.screenshots.length === 0) return null;
-    const latest = this.screenshots[this.screenshots.length - 1];
-    return {
-      base64: latest.thumbnail.toPNG().toString('base64'),
-      timestamp: latest.timestamp,
-      width: latest.width,
-      height: latest.height
-    };
-  }
-
-  /** Get latest as raw buffer (more efficient for API calls) */
-  getLatestBuffer() {
-    if (this.screenshots.length === 0) return null;
-    const latest = this.screenshots[this.screenshots.length - 1];
-    return {
-      buffer: latest.thumbnail.toPNG(),
-      timestamp: latest.timestamp,
-      width: latest.width,
-      height: latest.height
-    };
-  }
-
   /** Capture a fresh screenshot right now and return it */
   async captureNow() {
     const result = await this._capture();
@@ -99,17 +75,6 @@ class ScreenCapture {
       };
     }
     return null;
-  }
-
-  /** Get screenshot count (for debug) */
-  getBufferInfo() {
-    return {
-      count: this.screenshots.length,
-      maxSize: this.maxBufferSize,
-      isRunning: this.isRunning,
-      oldestTs: this.screenshots.length > 0 ? this.screenshots[0].timestamp : null,
-      newestTs: this.screenshots.length > 0 ? this.screenshots[this.screenshots.length - 1].timestamp : null
-    };
   }
 
   /** Internal: capture the primary screen */
@@ -126,7 +91,8 @@ class ScreenCapture {
         const util = require('util');
         const execAsync = util.promisify(exec);
 
-        const tmpPath = path.join(os.tmpdir(), `screenshot-${Date.now()}.png`);
+        // Unique per capture: two captures in the same millisecond must not share a file
+        const tmpPath = path.join(os.tmpdir(), `screenshot-${process.pid}-${require('crypto').randomUUID()}.png`);
         try {
           const cmd = this.linuxCaptureCmd.replace('%s', tmpPath);
           await execAsync(cmd);

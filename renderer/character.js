@@ -36,6 +36,3 @@ window.assistant.onPositionUpdate((data) => {
 charEl.addEventListener('click', () => {
   window.assistant.characterClicked();
 });
-
-// Request initial position
-window.assistant.requestPosition();

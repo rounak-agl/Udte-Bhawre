@@ -35,7 +35,17 @@
       this.overlay.onclick = (e) => { if (e.target === this.overlay) this.close(); };
       this.input.oninput = () => this.handleSearch();
       this.input.onkeydown = (e) => this.handleKeydown(e);
+
+      // Global shortcut: Ctrl+K (Cmd+K on macOS) toggles the palette
+      document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          this.isOpen ? this.close() : this.open();
+        }
+      });
     };
+
+    this.toggle = () => (this.isOpen ? this.close() : this.open());
 
     this.open = async () => {
       if (this.isOpen) return;

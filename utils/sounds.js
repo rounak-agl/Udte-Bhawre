@@ -28,13 +28,8 @@ function toggleSounds() {
   return soundsEnabled;
 }
 
-function setSoundsEnabled(val) {
-  soundsEnabled = val;
-  _saveSounds();
-}
-
 function _saveSounds() {
   Store.save({ soundsEnabled });
 }
 
-module.exports = { isSoundsEnabled, toggleSounds, setSoundsEnabled };
+module.exports = { isSoundsEnabled, toggleSounds };

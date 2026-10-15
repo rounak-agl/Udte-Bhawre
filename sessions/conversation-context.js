@@ -47,4 +47,12 @@ function toGeminiContents(history, { maxMessages = 40 } = {}) {
   return contents;
 }
 
-module.exports = { buildTranscript, toGeminiContents };
+/**
+ * The same turns as OpenAI-style chat messages ({ role: 'user'|'assistant', content }),
+ * used by Ollama's /api/chat.
+ */
+function toChatMessages(history, { maxMessages = 40 } = {}) {
+  return chatTurns(history).slice(-maxMessages).map(m => ({ role: m.role, content: m.text }));
+}
+
+module.exports = { buildTranscript, toGeminiContents, toChatMessages };

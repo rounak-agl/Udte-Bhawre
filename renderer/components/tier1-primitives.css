@@ -171,6 +171,9 @@
 .pf-badge--default { background: var(--pf-color-surface-tertiary); color: var(--pf-color-text-secondary); }
 .pf-badge--default .pf-badge-dot { background: var(--pf-color-text-muted); }
 
+.pf-badge--secondary { background: var(--pf-color-accent-soft); color: var(--pf-color-accent-primary); }
+.pf-badge--secondary .pf-badge-dot { background: var(--pf-color-accent-primary); }
+
 .pf-badge--success { background: rgba(46, 125, 50, 0.1); color: var(--pf-color-success); }
 .pf-badge--success .pf-badge-dot { background: var(--pf-color-success); }
 
@@ -192,6 +195,7 @@
   object-fit: cover;
 }
 
+.pf-avatar--xs { width: 20px; height: 20px; font-size: 9px; }
 .pf-avatar--sm { width: 24px; height: 24px; font-size: 10px; }
 .pf-avatar--md { width: 36px; height: 36px; font-size: 14px; }
 .pf-avatar--lg { width: 48px; height: 48px; font-size: 18px; }

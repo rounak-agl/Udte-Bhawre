@@ -141,14 +141,14 @@
 }
 .pf-chart-bar {
   width: 32px;
-  background: var(--pf-color-primary);
+  background: var(--pf-color-accent-primary);
   border-radius: 4px 4px 0 0;
   opacity: 0.3;
   transition: height 0.5s ease;
 }
 .pf-chart-bar.current {
   opacity: 1;
-  box-shadow: 0 0 15px var(--pf-color-primary);
+  box-shadow: 0 0 15px var(--pf-color-accent-primary);
 }
 .pf-chart-label {
   font-size: 11px;

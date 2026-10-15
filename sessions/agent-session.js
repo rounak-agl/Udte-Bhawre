@@ -1,6 +1,13 @@
 const Store = require('./store');
 const { seal, reveal, isSealed } = require('../utils/secret-store');
 
+/**
+ * Persistent app settings (~/.desktop-assistant-settings.json).
+ *
+ * Which LLM providers exist lives in sessions/providers.js; this module only stores
+ * values. Secrets are held encrypted (utils/secret-store.js) and decrypted on read.
+ */
+
 /** Copy of an MCP server map with every env value passed through fn (seal/reveal). */
 function mapMcpEnv(servers, fn) {
   const out = {};
@@ -12,58 +19,15 @@ function mapMcpEnv(servers, fn) {
   return out;
 }
 
-/**
- * Supported AI providers.
- */
-const PROVIDERS = {
-  vision: {
-    name: 'Gemini Vision',
-    binary: null,  // uses API directly, not CLI
-    installInstructions: 'Set your Gemini API key in the tray menu.\n  Get one free at: https://aistudio.google.com/apikey'
-  },
-  gemini: {
-    name: 'Gemini',
-    binary: 'gemini',
-    installInstructions: 'Install Google Gemini CLI:\n  npm install -g @google/gemini-cli\n  Then authenticate by running: gemini (and sign in with Google)'
-  },
-  claude: {
-    name: 'Claude',
-    binary: 'claude',
-    installInstructions: 'Install Claude CLI:\n  curl -fsSL https://claude.ai/install.sh | sh\n  Or download from https://claude.ai/download'
-  },
-  codex: {
-    name: 'Codex',
-    binary: 'codex',
-    installInstructions: 'Install OpenAI Codex CLI:\n  npm install -g @openai/codex'
-  },
-  copilot: {
-    name: 'Copilot',
-    binary: 'copilot',
-    installInstructions: 'Install GitHub Copilot CLI:\n  npm install -g @github/copilot-cli'
-  }
-};
-
-/**
- * Title format enum matching lil-agents.
- */
-const TITLE_FORMATS = {
-  uppercase: 'uppercase',
-  lowercaseTilde: 'lowercaseTilde',
-  capitalized: 'capitalized'
-};
-
-/**
- * Simple file-based store for settings persistence.
- */
 class SettingsStore {
   constructor() {
     this._provider = 'vision';
     this._theme = 'Peach';
-    this._apiKey = '';            // Gemini key (Gemini Vision + Gemini CLI); kept under its original name
+    this._apiKey = '';            // Gemini key (Gemini Vision); kept under its original name
     this._providerApiKeys = {};   // { claude, codex, copilot }
     this._elevenLabsApiKey = '';
-    this._toolsEnabled = true;
     this._mcpServers = {};
+    this._customModels = [];      // user-added local models: [{ id, name, type: 'ollama', model, baseUrl }]
     this._load();
   }
 
@@ -76,8 +40,8 @@ class SettingsStore {
       this._providerApiKeys = (store.providerApiKeys && typeof store.providerApiKeys === 'object') ? store.providerApiKeys : {};
       this._elevenLabsApiKey = store.elevenLabsApiKey || '';
       this._mongodbUri = store.mongodbUri || '';
-      this._toolsEnabled = store.toolsEnabled !== false; // default true
       this._mcpServers = store.mcpServers || {};
+      this._customModels = Array.isArray(store.customModels) ? store.customModels : [];
     } catch (e) {
       // defaults
     }
@@ -91,8 +55,8 @@ class SettingsStore {
       providerApiKeys: this._providerApiKeys,
       elevenLabsApiKey: this._elevenLabsApiKey,
       mongodbUri: this._mongodbUri,
-      toolsEnabled: this._toolsEnabled,
-      mcpServers: this._mcpServers
+      mcpServers: this._mcpServers,
+      customModels: this._customModels
     });
   }
 
@@ -101,6 +65,9 @@ class SettingsStore {
 
   get theme() { return this._theme; }
   set theme(v) { this._theme = v; this._save(); }
+
+  get customModels() { return this._customModels.map(m => ({ ...m })); }
+  set customModels(v) { this._customModels = v.map(m => ({ ...m })); this._save(); }
 
   // ── Secrets: held encrypted (see utils/secret-store.js), decrypted only when read ──
   get apiKey() { return reveal(this._apiKey); }
@@ -138,9 +105,6 @@ class SettingsStore {
     return count;
   }
 
-  get toolsEnabled() { return this._toolsEnabled; }
-  set toolsEnabled(v) { this._toolsEnabled = v; this._save(); }
-
   // MCP server env values are typically API tokens (GitHub PAT, Figma, Notion…)
   get mcpServers() { return mapMcpEnv(this._mcpServers, reveal); }
   set mcpServers(v) { this._mcpServers = mapMcpEnv(v, seal); this._save(); }
@@ -148,25 +112,13 @@ class SettingsStore {
 
 const settings = new SettingsStore();
 
+/** The default provider key for agents that don't set their own. Validate with providers.js. */
 function getCurrentProvider() {
   return settings.provider;
 }
 
 function setCurrentProvider(providerKey) {
-  if (PROVIDERS[providerKey]) {
-    settings.provider = providerKey;
-  }
-}
-
-function getProviderInfo(providerKey) {
-  return PROVIDERS[providerKey] || PROVIDERS.vision;
-}
-
-function getAllProviders() {
-  return Object.keys(PROVIDERS).map(key => ({
-    key,
-    ...PROVIDERS[key]
-  }));
+  settings.provider = providerKey;
 }
 
 function getCurrentTheme() {
@@ -185,11 +137,20 @@ function setApiKey(key) {
   settings.apiKey = key;
 }
 
+/** User-added local models (see providers.js for how they become providers). */
+function getCustomModels() {
+  return settings.customModels;
+}
+
+function setCustomModels(models) {
+  settings.customModels = models;
+}
+
 /**
- * Per-provider API keys. Each is handed to that provider's CLI through the environment
- * variable the CLI already reads. Gemini's key is the original "global" key and is
- * shared by Gemini Vision (API) and the Gemini CLI. An empty key sets nothing, so the
- * CLI falls back to its own login (e.g. `claude` / `gh` subscription auth).
+ * Per-provider API keys. Each CLI gets its key through the environment variable it
+ * already reads. Gemini's key is the original "global" key, used by Gemini Vision.
+ * An empty key sets nothing, so the CLI falls back to its own login
+ * (e.g. `claude` / `gh` subscription auth).
  */
 const API_KEY_PROVIDERS = {
   gemini: { label: 'Gemini', env: ['GEMINI_API_KEY'] },
@@ -245,14 +206,6 @@ function setMongodbUri(uri) {
   settings.mongodbUri = uri;
 }
 
-function getToolsEnabled() {
-  return settings.toolsEnabled;
-}
-
-function setToolsEnabled(enabled) {
-  settings.toolsEnabled = enabled;
-}
-
 function getMcpServers() {
   return settings.mcpServers;
 }
@@ -261,27 +214,15 @@ function setMcpServers(configs) {
   settings.mcpServers = configs;
 }
 
-function getTitleString(providerKey, format) {
-  const info = getProviderInfo(providerKey);
-  switch (format) {
-    case TITLE_FORMATS.uppercase: return info.name.toUpperCase();
-    case TITLE_FORMATS.lowercaseTilde: return `${info.name.toLowerCase()} ~`;
-    case TITLE_FORMATS.capitalized: return info.name;
-    default: return info.name;
-  }
-}
-
 module.exports = {
-  PROVIDERS,
-  TITLE_FORMATS,
   getCurrentProvider,
   setCurrentProvider,
-  getProviderInfo,
-  getAllProviders,
   getCurrentTheme,
   setCurrentTheme,
   getApiKey,
   setApiKey,
+  getCustomModels,
+  setCustomModels,
   API_KEY_PROVIDERS,
   apiKeyProviderFor,
   getProviderApiKey,
@@ -293,9 +234,6 @@ module.exports = {
   setElevenLabsApiKey,
   getMongodbUri,
   setMongodbUri,
-  getToolsEnabled,
-  setToolsEnabled,
   getMcpServers,
-  setMcpServers,
-  getTitleString
+  setMcpServers
 };

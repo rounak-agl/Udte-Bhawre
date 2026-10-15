@@ -1,3 +1,6 @@
+/* Must be the first rule: @import after other rules is ignored */
+@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 /* ─── Font Faces ─── */
 @font-face {
   font-family: 'Awesome Serif';
@@ -30,7 +33,6 @@
   font-style: italic;
 }
 
-@import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ─── Reset ─── */
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -274,10 +276,10 @@ html, body {
 
 /* Per-provider avatar tints */
 .msg-avatar.provider-claude   { background: linear-gradient(135deg, #7C6AE8 0%, #5B4BC9 100%); }
-.msg-avatar.provider-gemini   { background: linear-gradient(135deg, #4AAFEB 0%, #2B8FD6 100%); }
 .msg-avatar.provider-vision   { background: linear-gradient(135deg, #E86A9A 0%, #C94E7E 100%); }
 .msg-avatar.provider-codex    { background: linear-gradient(135deg, #43B88C 0%, #2E9B6E 100%); }
 .msg-avatar.provider-copilot  { background: linear-gradient(135deg, #E8A34A 0%, #D18A2E 100%); }
+.msg-avatar.provider-ollama   { background: linear-gradient(135deg, #5C6370 0%, #3E4451 100%); } /* user-added local models */
 
 .assistant-message .message-content {
   background: var(--msg-bg);
@@ -293,7 +295,7 @@ html, body {
   overflow-wrap: anywhere;
 }
 
-/* ─── Markdown styles ─── */
+/* ─── Markdown styles (classes emitted by control-centre/core/markdown.js) ─── */
 .assistant-message strong {
   font-weight: 700;
   color: var(--text-primary);
@@ -304,7 +306,7 @@ html, body {
   opacity: 0.85;
 }
 
-.md-inline-code {
+.pf-inline-code {
   background: var(--code-inline);
   padding: 2px 6px;
   border-radius: 5px;
@@ -312,7 +314,7 @@ html, body {
   font-size: 11.5px;
 }
 
-.md-code-block {
+.pf-code-block {
   background: var(--code-block);
   border: 1px solid var(--code-border);
   border-radius: 10px;
@@ -325,7 +327,9 @@ html, body {
   white-space: pre-wrap;
 }
 
-.md-heading {
+.pf-heading-lg,
+.pf-heading-md,
+.pf-heading-sm {
   font-family: 'Awesome Serif', 'Playfair Display', serif;
   font-weight: 700;
   margin: 10px 0 4px 0;
@@ -333,19 +337,19 @@ html, body {
   font-size: 14px;
 }
 
-h4.md-heading { font-size: 13px; }
+.pf-heading-sm { font-size: 13px; }
 
-.md-list-item {
+.pf-list-item {
   margin-left: 16px;
   margin-bottom: 2px;
   list-style: disc;
 }
 
-.md-list-item.md-ordered {
+.pf-list-item.pf-ordered {
   list-style: decimal;
 }
 
-.md-link {
+.pf-link {
   color: var(--link);
   text-decoration: underline;
   text-decoration-thickness: 1px;
@@ -353,7 +357,7 @@ h4.md-heading { font-size: 13px; }
   cursor: pointer;
 }
 
-.md-link:hover { opacity: 0.8; }
+.pf-link:hover { opacity: 0.8; }
 
 /* Error messages */
 .error-message .message-content {

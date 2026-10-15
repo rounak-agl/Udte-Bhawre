@@ -179,6 +179,18 @@ function ChatPage() {
     mainArea.appendChild(empty);
   }
   
+  // Command palette → "open this chat"
+  const onPaletteSelect = async (e) => {
+    const id = e.detail && e.detail.id;
+    if (!id) return;
+    if (!chatsList.some(c => c._id === id)) await loadChats();
+    currentChatId = id;
+    renderSidebar();
+    loadAndRenderMessages();
+  };
+  window.addEventListener('pf-chat-select', onPaletteSelect);
+  container._cleanup = () => window.removeEventListener('pf-chat-select', onPaletteSelect);
+
   // Init
   renderEmptyState();
   loadChats();

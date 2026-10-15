@@ -130,6 +130,37 @@
   animation: pf-slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Simple single-panel modal (Agents → Create, Tasks → New/Edit) */
+.pf-modal-box {
+  background: var(--pf-color-surface-secondary);
+  border: 1px solid var(--pf-color-border);
+  border-radius: var(--pf-radius-xl);
+  width: min(480px, calc(100vw - 32px));
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: var(--pf-spacing-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-spacing-lg);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+  color: var(--pf-color-text-primary);
+  animation: pf-slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.pf-modal-box h2 {
+  font-family: var(--pf-font-display);
+  font-size: var(--pf-font-size-h3);
+}
+/* The footer inside a modal box keeps its own spacing, without the container's band */
+.pf-modal-box .pf-modal-footer {
+  padding: 0;
+  border-top: none;
+  background: none;
+}
+.pf-select {
+  appearance: auto;
+  cursor: pointer;
+}
+
 @keyframes pf-slide-up {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -187,7 +218,7 @@
 }
 
 .pf-env-textarea:focus {
-  border-color: var(--pf-color-primary);
+  border-color: var(--pf-color-accent-primary);
 }
 
 .pf-env-desc {

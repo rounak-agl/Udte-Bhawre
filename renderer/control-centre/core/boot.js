@@ -71,6 +71,19 @@ async function boot() {
     actions: [] 
   });
 
+  // Search / command palette button (also Ctrl+K)
+  const isMac = navigator.platform.toUpperCase().includes('MAC');
+  const searchBtn = pfCreateElement('button', 'pf-topbar-search', {
+    type: 'button',
+    title: `Search (${isMac ? '⌘' : 'Ctrl'}+K)`,
+    'aria-label': 'Search agents, chats and pages'
+  });
+  searchBtn.appendChild(pfCreateElement('span', 'pf-topbar-search-icon', { innerHTML: window.PFIcons.search }));
+  searchBtn.appendChild(pfCreateElement('span', '', { textContent: 'Search' }));
+  searchBtn.appendChild(pfCreateElement('kbd', 'pf-topbar-search-kbd', { textContent: isMac ? '⌘K' : 'Ctrl K' }));
+  searchBtn.addEventListener('click', () => window.commandPalette && window.commandPalette.open());
+  topbar.querySelector('.pf-topbar-left').appendChild(searchBtn);
+
   const appShell = PFPageShell({ sidebar, topbar });
   root.appendChild(appShell);
 

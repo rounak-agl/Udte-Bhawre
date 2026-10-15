@@ -59,6 +59,40 @@ npm start
 
 *The application will launch and appear as a **tray icon** (look for the "Q" icon on your taskbar).*
 
+### 5. (Optional) Use a Local Model with Ollama
+
+Run models on your own machine instead of a cloud API:
+
+1. Install [Ollama](https://ollama.com) and pull a model, e.g. `ollama pull llama3.2`.
+2. Make sure it's running (`ollama serve`).
+3. In **Control Centre → Settings → Custom LLMs**, click **Find models**, pick the model and click **Add model**.
+
+The model then appears as a provider for agents and in every chat's ⚙ menu. Local models are text chat only; they don't get desktop tools.
+
+---
+
+## 🤖 Providers
+
+| Provider | How it runs | Key (Settings → API Keys) |
+|---|---|---|
+| Gemini Vision | Gemini API, with desktop tools | Gemini API key (required) |
+| Claude | `claude` CLI | Optional — otherwise your `claude` login |
+| Codex | `codex` CLI | Optional — otherwise your `codex` login |
+| Copilot | `copilot` CLI | Optional — otherwise your GitHub login |
+| Custom (Ollama) | Local Ollama server | None |
+
+Keys are encrypted at rest with your OS keychain (Electron `safeStorage`).
+
+---
+
+## 🧪 Running Tests
+
+```bash
+npm test
+```
+
+Runs the suite in `test/` with Node's built-in test runner — no Electron or database needed (both are stubbed), and your real settings are never touched. Tests that use fake CLI tools need a POSIX shell and are skipped on Windows.
+
 ---
 
 ## 📦 Building for Production
@@ -95,4 +129,5 @@ npm run build:win
 -   `renderer/` UI components and pages (Control Centre, Chat, Character overlays).
 -   `mcp-servers/` Built-in local MCP server for system tools.
 -   `utils/` Database utilities, taskbar geometry, and screen capture logic.
--   `sessions/` AI model session handlers (Gemini, Claude, Codex, etc.).
+-   `sessions/` AI model sessions: `providers.js` (registry of all providers), `cli-session.js` (shared base for the Claude/Codex/Copilot CLIs), `vision-session.js` (Gemini API + tools), `ollama-session.js` (local models).
+-   `test/` Automated tests (`npm test`).

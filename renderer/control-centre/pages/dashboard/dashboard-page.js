@@ -36,8 +36,12 @@ function DashboardPage() {
     if (!window.ccBridge) return;
     
     // 1. Agents
-    const allAgents = await window.ccBridge.getAgents() || [];
-    const activeCount = 0; 
+    const [allAgents, state] = await Promise.all([
+      window.ccBridge.getAgents().then(a => a || []),
+      window.ccBridge.getInitialState()
+    ]);
+    // Agents currently on the desktop
+    const activeCount = (state?.agents || []).length;
     metricCards.agents.querySelector('.pf-metric-value').textContent = `${activeCount}/${allAgents.length}`;
     metricCards.agents.querySelector('.pf-metric-subtitle').textContent = activeCount > 0 ? 'Running' : 'None active';
 

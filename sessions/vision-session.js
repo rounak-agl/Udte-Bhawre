@@ -269,7 +269,6 @@ class VisionSession extends EventEmitter {
         if (text) {
           textAccumulated += text;
           this.currentResponseText += text;
-          this._checkForBoundingBoxes(text);
           this.emit('text', text);
         }
 
@@ -376,45 +375,6 @@ class VisionSession extends EventEmitter {
     this.emit('text', '\n\n⚠️ Tool loop limit reached.');
   }
 
-  /** Send without screenshot (text-only mode) */
-  async sendTextOnly(message) {
-    if (!this.ai) {
-      this.emit('error', 'Vision session not started.');
-      return;
-    }
-
-    this.history.push({ role: 'user', text: message });
-    this.isBusy = true;
-    this.currentResponseText = '';
-
-    try {
-      this._conversationHistory.push({ role: 'user', parts: [{ text: message }] });
-
-      const functionDeclarations = this.toolsEnabled ? this.mcpClient.getAllFunctionDeclarations() : [];
-      const tools = functionDeclarations.length > 0
-        ? [{ functionDeclarations }]
-        : undefined;
-
-      this.mcpClient.resetIntentPlan();
-      this._turnPrompt = message;
-
-      await this._generateWithToolLoop(tools);
-
-      if (this.currentResponseText.trim()) {
-        this.history.push({ role: 'assistant', text: this.currentResponseText.trim() });
-      }
-
-      this.isBusy = false;
-      this.currentResponseText = '';
-      this.emit('turnComplete');
-
-    } catch (err) {
-      this.isBusy = false;
-      this.emit('error', `Gemini error: ${err.message}`);
-      this.emit('turnComplete');
-    }
-  }
-
   terminate() {
     this.isRunning = false;
     this.isBusy = false;
@@ -422,11 +382,6 @@ class VisionSession extends EventEmitter {
     this._conversationHistory = [];
     // Shutdown MCP client
     this.mcpClient.shutdown().catch(() => { });
-  }
-
-  /** Check streaming text for bounding box markers (real-time) */
-  _checkForBoundingBoxes(text) {
-    // Real-time detection — will be parsed in full after stream completes
   }
 
   /** Parse all bounding box steps from the complete response */

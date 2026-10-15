@@ -72,11 +72,4 @@ function getTaskbarGeometry() {
   };
 }
 
-/**
- * Get the Y position for a character above the taskbar (bottom position).
- */
-function getCharacterY(taskbarGeometry, characterHeight = 64) {
-  return taskbarGeometry.workArea.y + taskbarGeometry.workArea.height - characterHeight;
-}
-
-module.exports = { getTaskbarGeometry, getCharacterY };
+module.exports = { getTaskbarGeometry };

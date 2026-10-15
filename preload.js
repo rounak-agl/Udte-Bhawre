@@ -16,7 +16,6 @@ contextBridge.exposeInMainWorld('assistant', {
   onPositionUpdate: (callback) => onChannel('position-update', callback),
   onCharacterConfig: (callback) => onChannel('character-config', callback),
   characterClicked: () => ipcRenderer.send('character-clicked'),
-  requestPosition: () => ipcRenderer.send('request-position'),
 
   // Chat
   minimizeChat: () => ipcRenderer.send('chat-minimize'),
@@ -25,6 +24,7 @@ contextBridge.exposeInMainWorld('assistant', {
   setChatTools: (enabled) => ipcRenderer.send('chat-set-tools', enabled),
   onChatInit: (callback) => onChannel('chat-init', callback),
   onToolsChange: (callback) => onChannel('tools-change', callback),
+  onProvidersChanged: (callback) => onChannel('providers-changed', callback),
   onChatCleared: (callback) => onChannel('chat-cleared', callback),
   sendMessage: (msg) => ipcRenderer.send('chat-send', msg),
   onChatText: (callback) => onChannel('chat-text', callback),
@@ -37,8 +37,6 @@ contextBridge.exposeInMainWorld('assistant', {
   onThemeChange: (callback) => onChannel('theme-change', callback),
   onProviderChange: (callback) => onChannel('provider-change', callback),
   onApiKeyChange: (callback) => onChannel('api-key-changed', callback),
-  copyLastResponse: () => ipcRenderer.send('copy-last-response'),
-  getInitialState: () => ipcRenderer.invoke('get-initial-state'),
 
   // Security telemetry (ArmorIQ)
   onSecurityAuditEvent: (callback) => onChannel('security-audit-event', callback),
@@ -47,9 +45,6 @@ contextBridge.exposeInMainWorld('assistant', {
   // Bubble
   onBubbleShow: (callback) => onChannel('bubble-show', callback),
   onBubbleHide: (callback) => onChannel('bubble-hide', callback),
-
-  // Sounds
-  onPlaySound: (callback) => onChannel('play-sound', callback),
 
   // Overlay — bounding box and step guides
   onShowStepGuide: (callback) => onChannel('show-step-guide', callback),

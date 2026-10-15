@@ -19,7 +19,6 @@
   <link rel="stylesheet" href="./pages/settings/settings.css">
   <link rel="stylesheet" href="./pages/activity/activity.css">
   <link rel="stylesheet" href="./core/extras.css">
-  <!-- We will add page styles here later -->
 
 </head>
 <body>
@@ -31,7 +30,6 @@
   <!-- Utils & Data -->
   <script src="./core/utils.js"></script>
   <script src="./core/icons.js"></script>
-  <script src="./core/mock-data.js"></script>
 
   <!-- Component Library -->
   <script src="../components/tier1-primitives.js"></script>
@@ -45,15 +43,7 @@
   <script src="./core/markdown.js"></script>
   <script src="./core/command-palette.js"></script>
   
-  <!-- Pages (will be loaded before boot, mocks for now) -->
-  <script>
-    function renderPlaceholder(name) {
-      return () => PFUtils.el('div', '', { 
-        innerHTML: `<h1>${name}</h1><p>Under construction...</p>`, 
-        style: 'padding: 32px;' 
-      });
-    }
-  </script>
+  <!-- Pages -->
   <script src="./pages/dashboard/dashboard-page.js"></script>
   <script src="./pages/chat/chat-page.js"></script>
   <script src="./pages/tasks/tasks-page.js"></script>
@@ -64,7 +54,6 @@
   <!-- End Pages -->
 
   <!-- Boot -->
-  <script src="./core/extras.js"></script>
   <script src="./core/boot.js"></script>
 </body>
 </html>

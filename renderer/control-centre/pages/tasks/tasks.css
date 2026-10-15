@@ -77,35 +77,54 @@
   gap: var(--pf-spacing-sm);
 }
 
-/* Kanban Task Card */
-.pf-kanban-card {
+/* Kanban Task Card (classes rendered by tasks-page.js) */
+.pf-task-card {
   background: var(--pf-color-surface-primary);
   border: 1px solid var(--pf-color-border);
+  border-left: 3px solid var(--pf-color-border);
   border-radius: var(--pf-radius-md);
   padding: var(--pf-spacing-md);
-  cursor: grab;
+  cursor: pointer; /* click to edit */
   transition: transform var(--pf-transition-fast), box-shadow var(--pf-transition-fast);
 }
-.pf-kanban-card:hover {
+.pf-task-card:hover {
   transform: translateY(-2px);
   box-shadow: var(--pf-shadow-sm);
 }
-.pf-kanban-card:active {
-  cursor: grabbing;
-}
+/* Priority as a coloured left edge */
+.pf-task-card.priority-low    { border-left-color: var(--pf-color-info); }
+.pf-task-card.priority-medium { border-left-color: var(--pf-color-warning); }
+.pf-task-card.priority-high   { border-left-color: var(--pf-color-danger); }
 
-.pf-kanban-card-title {
-  font-weight: 500;
+.pf-task-title {
+  font-weight: 600;
   color: var(--pf-color-text-primary);
   font-size: var(--pf-font-size-body);
-  margin-bottom: var(--pf-spacing-sm);
+  overflow-wrap: anywhere;
 }
 
-.pf-kanban-card-meta {
+.pf-task-desc {
+  margin-top: var(--pf-spacing-xs);
+  font-size: var(--pf-font-size-caption);
+  color: var(--pf-color-text-secondary);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pf-task-footer {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: var(--pf-spacing-sm);
   margin-top: var(--pf-spacing-md);
+}
+
+.pf-task-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--pf-spacing-xs);
 }
 
 .pf-kanban-empty {

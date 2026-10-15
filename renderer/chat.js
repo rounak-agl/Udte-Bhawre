@@ -34,21 +34,24 @@ const themeClasses = {
   'Moss': 'theme-moss'
 };
 
-const providerNames = {
-  vision: 'Gemini Vision',
-  claude: 'Claude',
-  codex: 'Codex',
-  copilot: 'Copilot',
-  gemini: 'Gemini'
-};
+// Provider list comes from main (built-ins + the user's local models) via 'chat-init';
+// this is only the fallback until it arrives.
+let providers = [
+  { key: 'vision', name: 'Gemini Vision', emoji: '👁', kind: 'builtin', supportsTools: true },
+  { key: 'claude', name: 'Claude', emoji: '✦', kind: 'builtin' },
+  { key: 'codex', name: 'Codex', emoji: '⚡', kind: 'builtin' },
+  { key: 'copilot', name: 'Copilot', emoji: '🤖', kind: 'builtin' }
+];
 
-const providerEmojis = {
-  vision: '👁',
-  claude: '✦',
-  codex: '⚡',
-  copilot: '🤖',
-  gemini: '◆'
-};
+function providerInfo(key) {
+  return providers.find(p => p.key === key) || { key, name: 'Assistant', emoji: '✦', kind: 'builtin' };
+}
+
+// CSS class for the avatar tint: built-ins by key, every local model shares one tint
+function providerClass(key) {
+  const info = providerInfo(key);
+  return info.kind === 'ollama' ? 'provider-ollama' : `provider-${info.key}`;
+}
 
 // ─── Textarea auto-grow ───
 function autoGrow() {
@@ -61,8 +64,8 @@ inputField.addEventListener('input', autoGrow);
 // ─── Create a provider-tinted avatar ───
 function createAvatar(provider) {
   const avatar = document.createElement('div');
-  avatar.className = `msg-avatar provider-${provider || 'claude'}`;
-  avatar.textContent = providerEmojis[provider] || '✦';
+  avatar.className = `msg-avatar ${providerClass(provider)}`;
+  avatar.textContent = providerInfo(provider).emoji;
   return avatar;
 }
 
@@ -78,10 +81,10 @@ function applyTheme(themeName) {
 
 // ─── Update provider display ───
 function updateProviderUI() {
-  const name = providerNames[currentProvider] || 'Assistant';
+  const { name, emoji } = providerInfo(currentProvider);
   providerNameEl.textContent = name;
   inputField.placeholder = `Ask ${name} anything...`;
-  providerCardEmoji.textContent = providerEmojis[currentProvider] || '✦';
+  providerCardEmoji.textContent = emoji;
   providerCardTitle.textContent = `${name} Assistant`;
   providerCardSub.textContent = `Powered by ${name} — ask anything`;
   document.querySelectorAll('.settings-item[data-provider]').forEach(el => {
@@ -96,7 +99,7 @@ function updateProviderUI() {
 function updateToolsUI() {
   const section = document.getElementById('settings-tools-section');
   if (!section) return;
-  section.style.display = currentProvider === 'vision' ? '' : 'none';
+  section.style.display = providerInfo(currentProvider).supportsTools ? '' : 'none';
   const toggle = section.querySelector('[data-tools-toggle]');
   toggle.classList.toggle('active', toolsEnabled);
   toggle.querySelector('.item-label').textContent = `Desktop tools: ${toolsEnabled ? 'On' : 'Off'}`;
@@ -107,16 +110,13 @@ function createSettingsDropdown() {
   const dropdown = document.createElement('div');
   dropdown.id = 'settings-dropdown';
 
-  const providers = ['claude', 'gemini', 'vision', 'codex', 'copilot'];
   const themes = ['Peach', 'Midnight', 'Cloud', 'Moss'];
 
+  // Static skeleton only; provider buttons are added by renderProviderList() with DOM
+  // APIs, since custom model names are user input
   dropdown.innerHTML = `
     <div class="settings-section-title">Provider</div>
-    ${providers.map(p => `
-      <button class="settings-item ${p === currentProvider ? 'active' : ''}" data-provider="${p}">
-        <span class="item-dot"></span>${providerNames[p]}
-      </button>
-    `).join('')}
+    <div id="settings-provider-list"></div>
     <div id="settings-tools-section">
       <div class="settings-divider"></div>
       <div class="settings-section-title">Tools</div>
@@ -134,6 +134,7 @@ function createSettingsDropdown() {
   `;
 
   container.appendChild(dropdown);
+  renderProviderList();
   updateToolsUI();
 
   dropdown.addEventListener('click', (e) => {
@@ -158,6 +159,21 @@ function createSettingsDropdown() {
   });
 
   return dropdown;
+}
+
+/** (Re)build the provider buttons in the ⚙ menu from the current provider list. */
+function renderProviderList() {
+  const list = document.getElementById('settings-provider-list');
+  if (!list) return;
+  list.replaceChildren(...providers.map(p => {
+    const btn = document.createElement('button');
+    btn.className = `settings-item ${p.key === currentProvider ? 'active' : ''}`;
+    btn.dataset.provider = p.key;
+    const dot = document.createElement('span');
+    dot.className = 'item-dot';
+    btn.append(dot, document.createTextNode(p.kind === 'ollama' ? `${p.name} (local)` : p.name));
+    return btn;
+  }));
 }
 
 function toggleSettings(forceState) {
@@ -212,7 +228,9 @@ function parseError(text) {
 // ─── Initial state for this agent's chat (sent by main when the window loads) ───
 window.assistant.onChatInit((state) => {
   if (!state) return;
+  if (Array.isArray(state.providers) && state.providers.length) providers = state.providers;
   currentProvider = state.provider || currentProvider;
+  renderProviderList();
   toolsEnabled = state.toolsEnabled !== false;
   applyTheme(themeClasses[state.theme] ? state.theme : currentTheme);
 });
@@ -501,7 +519,7 @@ document.addEventListener('click', (e) => {
 btnStatus.addEventListener('click', () => {
   const status = sessionStatusEl;
   const original = status.textContent;
-  status.textContent = `${providerNames[currentProvider] || 'AI'} • ${currentTheme}`;
+  status.textContent = `${providerInfo(currentProvider).name} • ${currentTheme}`;
   setTimeout(() => { status.textContent = original; }, 2000);
 });
 
@@ -587,7 +605,7 @@ window.assistant.onProviderChange((provider) => {
   if (!provider || provider === currentProvider) return;
   currentProvider = provider;
   updateProviderUI();
-  addMessage('system', `🔄 Switched to ${providerNames[provider] || provider} — conversation continues.`);
+  addMessage('system', `🔄 Switched to ${providerInfo(provider).name} — conversation continues.`);
 });
 
 window.assistant.onApiKeyChange(() => {
@@ -598,6 +616,14 @@ window.assistant.onToolsChange((enabled) => {
   toolsEnabled = !!enabled;
   updateToolsUI();
   addMessage('system', toolsEnabled ? '🧰 Desktop tools enabled for this agent.' : '🧰 Desktop tools disabled for this agent.');
+});
+
+// A local model was added/removed in Settings → refresh the ⚙ menu
+window.assistant.onProvidersChanged((list) => {
+  if (!Array.isArray(list) || !list.length) return;
+  providers = list;
+  renderProviderList();
+  updateProviderUI();
 });
 
 // The saved conversation was deleted from the Control Centre: the agent starts fresh
@@ -627,29 +653,38 @@ const btnMic = document.getElementById('btn-mic');
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecordingAudio = false;
+// The user is still holding Space / the mic button. Recording setup is async (key
+// lookup, mic permission), so a release during setup must cancel it — otherwise the
+// mic would start after the key was already released and never stop.
+let recordingRequested = false;
 let spaceDownTimer = null;
 let spaceIsDown = false;
 
 async function startRecording() {
-  if (isRecordingAudio) return;
+  if (isRecordingAudio || recordingRequested) return;
+  recordingRequested = true;
 
   let apiKey;
   try {
     apiKey = await window.assistant.getElevenLabsApiKey();
   } catch (err) {
-    addMessage('error', 'ElevenLabs: Could not retrieve API key. Check tray settings.');
+    recordingRequested = false;
+    addMessage('error', 'ElevenLabs: Could not retrieve API key. Check Control Centre → Settings.');
     return;
   }
 
   if (!apiKey) {
-    addMessage('error', 'ElevenLabs: No API key configured. Set it in the tray menu first.');
+    recordingRequested = false;
+    addMessage('error', 'ElevenLabs: No API key configured. Add it in Control Centre → Settings.');
     return;
   }
+  if (!recordingRequested) return; // released while we were fetching the key
 
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (err) {
+    recordingRequested = false;
     const reason = err.name === 'NotAllowedError'
       ? 'Microphone access denied. Grant permission in system settings.'
       : err.name === 'NotFoundError'
@@ -658,10 +693,15 @@ async function startRecording() {
     addMessage('error', reason);
     return;
   }
+  if (!recordingRequested) { // released while the mic was opening
+    stream.getTracks().forEach(t => t.stop());
+    return;
+  }
 
   try {
     mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
   } catch (err) {
+    recordingRequested = false;
     stream.getTracks().forEach(t => t.stop());
     addMessage('error', `Recording: Browser does not support audio/webm — ${err.message}`);
     return;
@@ -734,6 +774,7 @@ async function startRecording() {
     stream.getTracks().forEach(t => t.stop());
     btnMic.classList.remove('recording');
     isRecordingAudio = false;
+    recordingRequested = false;
     addMessage('error', `Recording error: ${e.error ? e.error.message : 'Unknown recording failure'}`);
     sessionStatusEl.textContent = 'Ready';
   });
@@ -745,6 +786,7 @@ async function startRecording() {
 }
 
 function stopRecording() {
+  recordingRequested = false; // also cancels a start that is still setting up
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     try { mediaRecorder.stop(); } catch (_) { /* already stopped */ }
   }
@@ -755,40 +797,39 @@ function stopRecording() {
 
 btnMic.addEventListener('mousedown', () => { startRecording(); });
 btnMic.addEventListener('mouseup', () => { stopRecording(); });
-btnMic.addEventListener('mouseleave', () => { if (isRecordingAudio) stopRecording(); });
+btnMic.addEventListener('mouseleave', () => { if (isRecordingAudio || recordingRequested) stopRecording(); });
+
+/**
+ * Hold-Space push-to-talk only applies when you're not typing: the message box is
+ * empty (or something other than a text field/button has focus). Once there's text,
+ * Space is just a space — no delay, no reordering of fast keystrokes, no accidental
+ * recording from key repeat.
+ */
+function isPushToTalkSpace(e) {
+  if (e.code !== 'Space' || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return false;
+  const el = document.activeElement;
+  if (el === inputField) return inputField.value.length === 0;
+  return !(el && ['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+}
 
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space') {
-    if (spaceIsDown) return;
-    spaceIsDown = true;
-    if (document.activeElement === inputField) {
-      e.preventDefault();
-    }
-    spaceDownTimer = setTimeout(() => {
-      startRecording();
-    }, 250);
-  }
+  if (spaceIsDown && e.code === 'Space') { e.preventDefault(); return; } // key repeat while held
+  if (!isPushToTalkSpace(e)) return;
+  e.preventDefault();
+  spaceIsDown = true;
+  spaceDownTimer = setTimeout(() => {
+    spaceDownTimer = null;
+    startRecording();
+  }, 250);
 });
 
 window.addEventListener('keyup', (e) => {
-  if (e.code === 'Space') {
-    spaceIsDown = false;
-    if (spaceDownTimer) {
-      clearTimeout(spaceDownTimer);
-      spaceDownTimer = null;
-      if (!isRecordingAudio) {
-        if (document.activeElement === inputField) {
-          const start = inputField.selectionStart;
-          const end = inputField.selectionEnd;
-          const val = inputField.value;
-          inputField.value = val.substring(0, start) + ' ' + val.substring(end);
-          inputField.selectionStart = inputField.selectionEnd = start + 1;
-          autoGrow();
-        }
-      }
-    }
-    if (isRecordingAudio) {
-      stopRecording();
-    }
+  if (e.code !== 'Space' || !spaceIsDown) return;
+  spaceIsDown = false;
+  if (spaceDownTimer) {
+    // A short tap: nothing to record (and nothing to type — the box was empty)
+    clearTimeout(spaceDownTimer);
+    spaceDownTimer = null;
   }
+  if (isRecordingAudio || recordingRequested) stopRecording();
 });

@@ -9,6 +9,7 @@ function SettingsPage() {
   const menu = window.pfCreateElement('div', 'pf-settings-menu');
   const sectionsMenu = [
     { id: 'general', label: 'General' },
+    { id: 'models', label: 'Custom LLMs' },
     { id: 'appearance', label: 'Appearance' },
     { id: 'security', label: 'Security & Access' },
     { id: 'about', label: 'About' }
@@ -40,33 +41,36 @@ function SettingsPage() {
   const generalSection = window.pfCreateElement('div', 'pf-settings-section active', { id: 'settings-general' });
   generalSection.appendChild(window.pfCreateElement('h2', 'pf-settings-section-title', { textContent: 'General' }));
   
-  // 1. Model Provider
-  const currentProvider = window.store.get('provider') || 'vision';
+  // 1. Default provider — built-ins plus the user's local models (from the registry)
   const providerGroup = window.pfCreateElement('div', 'pf-form-group');
-  providerGroup.appendChild(window.pfCreateElement('label', 'pf-input-label', { textContent: 'Default LLM Provider' }));
-  
-  const providerRow = window.pfCreateElement('div', 'pf-form-row', { style: 'gap: 8px;' });
-  // Updated list to match sessions/agent-session.js
-  const providers = ['vision', 'claude', 'gemini', 'codex', 'copilot'];
-  providers.forEach(prov => {
-    const pBtn = window.PFButton({ 
-      label: window.PFUtils.capitalize(prov), 
-      variant: currentProvider === prov ? 'primary' : 'secondary',
-      size: 'sm'
-    });
-    pBtn.onclick = () => {
-      window.store.set('provider', prov);
-      if (window.ccBridge) window.ccBridge.setProvider(prov);
-      window.PFToast.show('Provider Updated', `Switched default provider to ${prov}`);
-      Array.from(providerRow.children).forEach(b => {
-        const bLabel = b.querySelector('.pf-btn-label')?.textContent.toLowerCase();
-        b.className = `pf-btn pf-btn--${bLabel === prov ? 'primary' : 'secondary'} pf-btn--sm`;
-      });
-    };
-    providerRow.appendChild(pBtn);
-  });
-  providerGroup.appendChild(providerRow);
+  providerGroup.appendChild(window.pfCreateElement('label', 'pf-input-label', { textContent: 'Default LLM Provider', for: 'default-provider' }));
+  const providerSelect = window.pfCreateElement('select', 'pf-input pf-select', { id: 'default-provider' });
+  providerGroup.appendChild(providerSelect);
+  providerGroup.appendChild(window.pfCreateElement('div', 'pf-form-desc', {
+    textContent: 'Used by agents that don\'t have their own provider. Each chat can also switch its agent\'s provider from the ⚙ menu.'
+  }));
   generalSection.appendChild(providerGroup);
+
+  const providerLabel = (p) => p.kind === 'ollama' ? `${p.name} — local (${p.model})` : p.name;
+
+  // Rebuilt after custom models are added/removed
+  const refreshProviderSelect = async () => {
+    if (!window.ccBridge) return;
+    const [list, state] = await Promise.all([window.ccBridge.getProviders(), window.ccBridge.getInitialState()]);
+    const selected = state?.provider || window.store.get('provider');
+    providerSelect.replaceChildren(...list.map(p => {
+      const opt = window.pfCreateElement('option', '', { value: p.key, textContent: providerLabel(p) });
+      if (p.key === selected) opt.selected = true;
+      return opt;
+    }));
+  };
+  providerSelect.onchange = () => {
+    const key = providerSelect.value;
+    window.store.set('provider', key);
+    if (window.ccBridge) window.ccBridge.setProvider(key);
+    window.PFToast.show('Provider Updated', `Default provider is now ${providerSelect.selectedOptions[0]?.textContent || key}.`);
+  };
+  refreshProviderSelect().catch(() => {});
 
   /**
    * A secret setting: hidden input with a show/hide button, a Save button and a hint.
@@ -113,7 +117,7 @@ function SettingsPage() {
   const providerKeys = window.ccBridge ? window.ccBridge.getProviderApiKeys() : Promise.resolve({});
   const providerKeyFields = [
     { provider: 'gemini', label: 'Gemini API Key', placeholder: 'AIza…',
-      desc: 'Used by Gemini Vision and the Gemini CLI. Get one free at aistudio.google.com/apikey.' },
+      desc: 'Used by Gemini Vision. Get one free at aistudio.google.com/apikey.' },
     { provider: 'claude', label: 'Claude API Key (Anthropic)', placeholder: 'sk-ant-…',
       desc: 'Optional. Sent to the Claude CLI as ANTHROPIC_API_KEY — leave empty to use your `claude` login.' },
     { provider: 'codex', label: 'Codex API Key (OpenAI)', placeholder: 'sk-…',
@@ -193,13 +197,175 @@ function SettingsPage() {
   appearanceSection.appendChild(themeGrid);
   content.appendChild(appearanceSection);
 
-  // --- STUBS ---
+  // Small builders shared by the sections below (text only — values may be user input)
+  const el = (tag, cls, text) => window.pfCreateElement(tag, cls, text === undefined ? {} : { textContent: text });
+  const infoRow = (label, value) => {
+    const row = el('div', 'pf-info-row');
+    row.append(el('div', 'pf-info-label', label), el('div', 'pf-info-value', value));
+    return row;
+  };
+  const chips = (items, empty) => {
+    const wrap = el('div', 'pf-chip-list');
+    if (!items.length) wrap.appendChild(el('span', 'pf-form-desc', empty));
+    items.forEach(i => wrap.appendChild(el('code', 'pf-chip', i)));
+    return wrap;
+  };
+
+  // --- CUSTOM LLMs (Ollama) ---
+  const modelsSection = window.pfCreateElement('div', 'pf-settings-section', { id: 'settings-models' });
+  modelsSection.appendChild(el('h2', 'pf-settings-section-title', 'Custom LLMs'));
+  modelsSection.appendChild(el('p', 'pf-form-desc',
+    'Run your own models locally with Ollama. Pull a model first (e.g. `ollama pull llama3.2`), then add it here — ' +
+    'it appears as a provider for agents and in every chat\'s ⚙ menu. Local models chat only; they don\'t get desktop tools.'));
+
+  const modelList = el('div', 'pf-model-list');
+  modelsSection.appendChild(modelList);
+
+  const renderModelList = async () => {
+    const list = window.ccBridge ? (await window.ccBridge.getProviders()).filter(p => p.kind === 'ollama') : [];
+    modelList.replaceChildren();
+    if (!list.length) {
+      modelList.appendChild(el('div', 'pf-model-empty', 'No local models yet.'));
+      return;
+    }
+    list.forEach(m => {
+      const row = el('div', 'pf-model-row');
+      const info = el('div', 'pf-model-info');
+      info.append(el('div', 'pf-model-name', `🦙 ${m.name}`), el('div', 'pf-model-meta', `${m.model} · ${m.baseUrl}`));
+      const removeBtn = window.PFButton({ label: 'Remove', variant: 'ghost', size: 'sm' });
+      removeBtn.onclick = async () => {
+        if (!confirm(`Remove ${m.name}? Agents using it will ask you to pick another provider.`)) return;
+        if (await window.ccBridge.removeCustomModel(m.key.slice('ollama:'.length))) {
+          window.PFToast.show('Removed', `${m.name} removed.`);
+          renderModelList();
+          refreshProviderSelect();
+        }
+      };
+      row.append(info, removeBtn);
+      modelList.appendChild(row);
+    });
+  };
+
+  // Add form: server URL → suggestions from the models pulled there (free text still allowed)
+  modelsSection.appendChild(el('h3', 'pf-settings-subsection-title', 'Add a model'));
+  const urlWrap = window.PFInput({ label: 'Ollama server', value: 'http://localhost:11434', id: 'ollama-url' });
+  const urlInput = urlWrap.querySelector('input');
+  const findBtn = window.PFButton({ label: 'Find models', variant: 'secondary' });
+  const urlRow = el('div', 'pf-form-row');
+  urlWrap.style.flex = '1';
+  urlRow.append(urlWrap, findBtn);
+  modelsSection.appendChild(urlRow);
+
+  const modelWrap = window.PFInput({ label: 'Model', placeholder: 'e.g. llama3.2 or qwen2.5-coder:7b', id: 'ollama-model' });
+  const modelInput = modelWrap.querySelector('input');
+  const datalist = window.pfCreateElement('datalist', '', { id: 'ollama-model-options' });
+  modelInput.setAttribute('list', 'ollama-model-options');
+  modelInput.setAttribute('autocomplete', 'off');
+  modelWrap.appendChild(datalist);
+  modelsSection.appendChild(modelWrap);
+  const findStatus = el('div', 'pf-form-desc', '');
+  modelsSection.appendChild(findStatus);
+
+  const nameWrap = window.PFInput({ label: 'Display name (optional)', placeholder: 'e.g. Llama (local)', id: 'ollama-name' });
+  modelsSection.appendChild(nameWrap);
+
+  const findModels = async () => {
+    if (!window.ccBridge) return;
+    findStatus.classList.remove('is-warning');
+    findStatus.textContent = 'Looking for models…';
+    const res = await window.ccBridge.listOllamaModels(urlInput.value.trim());
+    if (!res.ok) {
+      findStatus.classList.add('is-warning');
+      findStatus.textContent = `⚠️ ${res.error} You can still type a model name.`;
+      datalist.replaceChildren();
+      return;
+    }
+    datalist.replaceChildren(...res.models.map(m => window.pfCreateElement('option', '', { value: m.name })));
+    findStatus.textContent = res.models.length
+      ? `Found ${res.models.length} pulled model${res.models.length === 1 ? '' : 's'}: ${res.models.map(m => m.name).join(', ')}`
+      : 'Ollama is running but has no models yet — pull one with `ollama pull <model>`.';
+    if (!modelInput.value && res.models[0]) modelInput.value = res.models[0].name;
+  };
+  findBtn.onclick = findModels;
+
+  const addBtn = window.PFButton({ label: 'Add model', variant: 'primary' });
+  addBtn.onclick = async () => {
+    if (!window.ccBridge) return;
+    const res = await window.ccBridge.addCustomModel({
+      baseUrl: urlInput.value.trim(),
+      model: modelInput.value.trim(),
+      name: nameWrap.querySelector('input').value.trim()
+    });
+    if (!res.ok) {
+      window.PFToast.show('Error', res.error);
+      return;
+    }
+    window.PFToast.show('Added', `${res.model.name} is now available as a provider.`);
+    modelInput.value = '';
+    nameWrap.querySelector('input').value = '';
+    renderModelList();
+    refreshProviderSelect();
+  };
+  const addRow = el('div', 'pf-form-actions');
+  addRow.appendChild(addBtn);
+  modelsSection.appendChild(addRow);
+
+  renderModelList().catch(() => {});
+  findModels().catch(() => {});
+  content.appendChild(modelsSection);
+
+  // --- SECURITY & ACCESS (read-only overview of what actually protects you) ---
   const secSection = window.pfCreateElement('div', 'pf-settings-section', { id: 'settings-security' });
-  secSection.innerHTML = '<h2 class="pf-settings-section-title">Security & Access</h2><p>Manage ArmorIQ policies and intent locks.</p>';
+  secSection.appendChild(el('h2', 'pf-settings-section-title', 'Security & Access'));
+  secSection.appendChild(el('p', 'pf-form-desc', 'A read-only summary of the protections currently in effect.'));
+  const secBody = el('div', 'pf-info-list');
+  secSection.appendChild(secBody);
+  if (window.ccBridge) {
+    window.ccBridge.getSecurityOverview().then(s => {
+      if (!s) return;
+      const card = (title, ...children) => {
+        const c = el('div', 'pf-info-card');
+        c.appendChild(el('h3', 'pf-info-card-title', title));
+        c.append(...children);
+        return c;
+      };
+      const guardStatus = el('div', `pf-status ${s.guard.active ? 'is-ok' : 'is-off'}`, s.guard.active ? '● Active' : '○ Not active');
+      secBody.append(
+        card('ArmorIQ intent guard', guardStatus, el('p', 'pf-form-desc', s.guard.active
+          ? `Each turn's tool calls are sealed into a signed intent plan; anything outside it, or unverifiable, is blocked. Key from: ${s.guard.keySource}.`
+          : `Add an ArmorIQ API key (ARMORIQ_API_KEY, or ${s.guard.keySource}) to enable it. Until then the protections below still apply.`)),
+        card('Policy (armoriq.policy.json)',
+          el('div', 'pf-info-label', 'Always blocked'), chips(s.policy.deny, 'None'),
+          el('div', 'pf-info-label', 'Allowed tools'), chips(s.policy.allow, 'All tools (no allow-list set)'),
+          el('p', 'pf-form-desc', `Edit ${s.policy.path} to change these; restart to apply.`)),
+        card('Ask before running', chips(s.approvalTools, 'Nothing'),
+          el('p', 'pf-form-desc', 'These desktop tools show an Allow / Deny prompt every time.')),
+        card('File access', el('p', 'pf-info-value', s.fileAccess)),
+        card('Stored secrets', el('p', 'pf-info-value', s.secrets.encrypted
+          ? `Encrypted with your system keychain${s.secrets.backend ? ` (${s.secrets.backend})` : ''}.`
+          : 'Not encrypted — no system keychain available (file is owner-only).'))
+      );
+    }).catch(() => secBody.appendChild(el('p', 'pf-form-desc', 'Could not load the security overview.')));
+  }
   content.appendChild(secSection);
 
+  // --- ABOUT ---
   const abtSection = window.pfCreateElement('div', 'pf-settings-section', { id: 'settings-about' });
-  abtSection.innerHTML = '<h2 class="pf-settings-section-title">About Astrophage</h2><p>Version 2.0.0-alpha</p>';
+  abtSection.appendChild(el('h2', 'pf-settings-section-title', 'About'));
+  const aboutBody = el('div', 'pf-info-card');
+  abtSection.appendChild(aboutBody);
+  if (window.ccBridge) {
+    window.ccBridge.getAppInfo().then(info => {
+      aboutBody.append(
+        infoRow('App', `${info.name} ${info.version}`),
+        infoRow('Electron', `${info.electron} (Chromium ${info.chrome}, Node ${info.node})`),
+        infoRow('Platform', info.platform),
+        infoRow('Database', info.database),
+        infoRow('Settings file', info.settingsFile),
+        infoRow('Policy file', info.policyFile)
+      );
+    }).catch(() => {});
+  }
   content.appendChild(abtSection);
 
   container.appendChild(content);
