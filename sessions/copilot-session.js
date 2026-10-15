@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const spawn = require('cross-spawn'); // no shell: user text must never reach sh/cmd.exe
 const { findBinary, getProcessEnv } = require('../utils/shell-env');
 const os = require('os');
 const EventEmitter = require('events');
@@ -34,7 +34,6 @@ class CopilotSession extends EventEmitter {
         cwd: os.homedir(),
         env: getProcessEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
-        shell: true,
         windowsHide: true
       });
 

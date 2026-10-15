@@ -110,4 +110,13 @@ function openControlCentre(page = 'dashboard') {
   });
 }
 
-module.exports = { initControlCentre, openControlCentre };
+/**
+ * True only for IPC sent by the Control Centre window itself. Used to gate
+ * settings that can launch processes or change credentials (MCP servers, API keys…),
+ * so chat/character/overlay windows — which render model output — can't reach them.
+ */
+function isControlCentreSender(event) {
+  return !!(ccWindow && !ccWindow.isDestroyed() && event.sender === ccWindow.webContents);
+}
+
+module.exports = { initControlCentre, openControlCentre, isControlCentreSender };

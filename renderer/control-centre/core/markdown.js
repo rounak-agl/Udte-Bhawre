@@ -1,10 +1,14 @@
 // renderer/control-centre/core/markdown.js
 
 const PFMarkdown = {
+  // Escapes quotes too, so escaped text is also safe inside attribute values (e.g. href).
   escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   },
 
   render(text) {
@@ -49,7 +53,12 @@ const PFMarkdown = {
     html = html.replace(/^\d+\. (.+)$/gm, '<li class="pf-list-item pf-ordered">$1</li>');
 
     // 8. Links
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="pf-link" target="_blank">$1</a>');
+    // href is already HTML-escaped (quotes included); only http(s)/mailto links are
+    // rendered, anything else (javascript:, data:, file:…) is shown as plain text.
+    html = html.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (match, label, href) => {
+      if (!/^(https?:\/\/|mailto:)/i.test(href)) return label;
+      return `<a href="${href}" class="pf-link" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    });
 
     // 9. Line breaks
     html = html.replace(/\n/g, '<br>');

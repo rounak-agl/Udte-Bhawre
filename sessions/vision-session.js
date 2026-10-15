@@ -138,19 +138,10 @@ class VisionSession extends EventEmitter {
         ? [{ functionDeclarations }]
         : undefined;
 
-      // ── ArmorIQ: Create intent plan BEFORE tool execution ──
-      if (functionDeclarations.length > 0) {
-        try {
-          await this.mcpClient.createIntentPlan(message, functionDeclarations);
-        } catch (planErr) {
-          // Failure surfaces a clear UI message natively via the intent-failed event internally
-          this.emit('text', `\n\n🛡️ **ArmorIQ Security Intervention:** Intent planning failed — see security panel. (${planErr.message})\n`);
-          this.isBusy = false;
-          this.currentResponseText = '';
-          this.emit('turnComplete');
-          return; // Stop execution
-        }
-      }
+      // ── ArmorIQ: fresh turn — the intent plan is sealed inside the tool loop from
+      // the tools the model actually proposes, never carried over from a previous turn ──
+      this.mcpClient.resetIntentPlan();
+      this._turnPrompt = message;
 
       // Run the function calling loop
       await this._generateWithToolLoop(tools);
@@ -194,6 +185,7 @@ class VisionSession extends EventEmitter {
    * 3. If response contains text → stream to UI → done
    */
   async _generateWithToolLoop(tools, maxIterations = 5) {
+    let intentSealed = false;
     for (let i = 0; i < maxIterations; i++) {
       // Stream response from Gemini
       const responseStream = await this.ai.models.generateContentStream({
@@ -241,6 +233,19 @@ class VisionSession extends EventEmitter {
       // If no function calls, we're done — text has been streamed
       if (functionCalls.length === 0) {
         return;
+      }
+
+      // ── ArmorIQ: seal the intent plan from the first batch of tool calls the model
+      // proposes this turn. Later iterations may only use tools from that plan, so a
+      // tool result that injects "now call open_url…" is blocked as intent drift.
+      if (!intentSealed) {
+        intentSealed = true;
+        const declarations = tools?.[0]?.functionDeclarations || [];
+        const proposed = [...new Set(functionCalls.map(c => c.name))].map(name => ({
+          name,
+          description: declarations.find(d => d.name === name)?.description || name
+        }));
+        await this.mcpClient.createIntentPlan(this._turnPrompt || '', proposed);
       }
 
       // Execute function calls and send results back
@@ -329,18 +334,8 @@ class VisionSession extends EventEmitter {
         ? [{ functionDeclarations }]
         : undefined;
 
-      // ── ArmorIQ: Create intent plan BEFORE tool execution ──
-      if (functionDeclarations.length > 0) {
-        try {
-          await this.mcpClient.createIntentPlan(message, functionDeclarations);
-        } catch (planErr) {
-          this.emit('text', `\n\n🛡️ **ArmorIQ Security Intervention:** Intent planning failed — see security panel. (${planErr.message})\n`);
-          this.isBusy = false;
-          this.currentResponseText = '';
-          this.emit('turnComplete');
-          return;
-        }
-      }
+      this.mcpClient.resetIntentPlan();
+      this._turnPrompt = message;
 
       await this._generateWithToolLoop(tools);
 

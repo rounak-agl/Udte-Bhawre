@@ -12,7 +12,8 @@ const os = require('os');
  *   3. Audit Logging     — full execution trail with allow/block decisions
  *
  * Events emitted:
- *   'intent-created'   (plan)             — a new intent plan was approved
+ *   'intent-sealed'    (info)             — a new intent plan was approved
+ *   'intent-failed'    ({ reason })       — intent planning failed
  *   'intent-verified'  (toolName)         — a tool call was approved
  *   'intent-blocked'   (toolName, reason) — a tool call was blocked by intent drift
  *   'policy-denied'    (toolName, reason) — a tool call was blocked by local policy
@@ -189,9 +190,8 @@ class ArmorIQGuard extends EventEmitter {
     }
 
     try {
-      // Include all available tools in the intent plan.
-      // Security enforcement is handled by the policy deny list and argument
-      // pattern blocking — the intent plan should not be the bottleneck.
+      // `tools` must be the tools the model actually proposed for this turn (not
+      // every available tool), otherwise the intent-drift check can never block.
       const intendedTools = tools;
 
       // Build a plan object from the intended tools
@@ -316,17 +316,15 @@ class ArmorIQGuard extends EventEmitter {
     }
 
 
-    // ── Stage 2: Intent Token Validation ───────────────────
+    // ── Stage 2: Intent Token Validation (fail-closed) ─────
     if (!this.currentToken || !this.currentPlan) {
-      // No intent plan — but policy passed. Allow in degraded mode
-      // to avoid blocking the entire app when the IAP backend is unreachable.
-      console.warn(`[ArmorIQ] ⚠️  No intent plan — allowing ${toolName} via policy-only mode`);
-      this._log('tool_call', 'allow', toolName, {
-        reason: 'No intent plan — policy-only mode',
-        stage: 'intent',
-      });
-      this.emit('intent-verified', toolName);
-      return { allowed: true, reason: 'Policy-only mode (no intent plan)' };
+      // The guard is enabled but no plan was sealed for this turn (planning failed
+      // or the IAP backend is unreachable). Block rather than run unverified.
+      const reason = 'No sealed intent plan for this turn (fail-closed)';
+      this._log('tool_call', 'block', toolName, { reason, stage: 'intent' });
+      this.emit('intent-blocked', toolName, reason);
+      console.log(`[ArmorIQ] ❌ NO INTENT PLAN: ${toolName} — blocked`);
+      throw Object.assign(new Error(reason), { code: 'NO_INTENT' });
     }
 
     // Check if the tool is in the approved plan
@@ -393,10 +391,10 @@ class ArmorIQGuard extends EventEmitter {
       }
 
 
-      // Network/backend error — allow based on local plan + policy checks
-      console.log(`[ArmorIQ] ⚠️  Backend unreachable — allowing ${toolName} based on local plan + policy`);
-      this.emit('intent-verified', toolName);
-      return { allowed: true, reason: 'Allowed by local plan + policy (backend unreachable)' };
+      // Network/backend error — the call could not be verified, so block it (fail-closed)
+      console.log(`[ArmorIQ] ❌ Backend unreachable — blocking unverified ${toolName}`);
+      this.emit('intent-blocked', toolName, reason);
+      throw Object.assign(new Error(reason), { code: 'VERIFY_UNAVAILABLE' });
     }
   }
 
@@ -434,7 +432,9 @@ class ArmorIQGuard extends EventEmitter {
       'curl | ', 'wget | ', '> /dev/sda',
       'kill -9', 'killall', 'pkill'
     ];
-    const argValues = Object.values(args).join(' ').toLowerCase();
+    // Flatten nested objects/arrays (and keys) so payloads can't hide one level down,
+    // and collapse whitespace so "rm  -rf" / "rm\t-rf" still match "rm -r".
+    const argValues = this._collectArgStrings(args).join(' ').replace(/\s+/g, ' ').toLowerCase();
 
     for (const pattern of dangerousStrings) {
       if (argValues.includes(pattern)) {
@@ -457,6 +457,40 @@ class ArmorIQGuard extends EventEmitter {
     return { allowed: true };
   }
 
+
+  /**
+   * Recursively collect every string/number/boolean value (and object key) in the args.
+   * Throws POLICY_DENY on absurdly deep nesting rather than skipping it.
+   */
+  _collectArgStrings(value, out = [], depth = 0) {
+    if (depth > 32) {
+      throw Object.assign(new Error('Security Block: tool arguments are nested too deeply to inspect.'), { code: 'POLICY_DENY' });
+    }
+    if (value === null || value === undefined) return out;
+    if (typeof value === 'string') {
+      out.push(value);
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      out.push(String(value));
+    } else if (Array.isArray(value)) {
+      for (const item of value) this._collectArgStrings(item, out, depth + 1);
+    } else if (typeof value === 'object') {
+      for (const [key, item] of Object.entries(value)) {
+        out.push(key);
+        this._collectArgStrings(item, out, depth + 1);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Forget the current plan/token. Call at the start of every user turn so a
+   * previous turn's plan can never authorize this turn's tool calls.
+   */
+  clearPlan() {
+    this.currentToken = null;
+    this.currentPlan = null;
+    this.allowedActions.clear();
+  }
 
   /**
    * Load policy from the JSON file.

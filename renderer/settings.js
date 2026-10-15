@@ -265,15 +265,25 @@ function renderCustomServers() {
     const config = currentServers[name];
     const argsString = (config.args || []).join(' ');
 
+    // Built with DOM APIs: server names/commands are user input and must never be
+    // interpolated into HTML or an inline onclick string.
     const card = document.createElement('div');
     card.className = 'custom-server-card';
-    card.innerHTML = `
-      <div class="server-info">
-        <h4>${name}</h4>
-        <code>${config.command} ${argsString}</code>
-      </div>
-      <button class="btn-remove" onclick="removeServer('${name}')">Remove</button>
-    `;
+
+    const info = document.createElement('div');
+    info.className = 'server-info';
+    const title = document.createElement('h4');
+    title.textContent = name;
+    const code = document.createElement('code');
+    code.textContent = `${config.command} ${argsString}`;
+    info.append(title, code);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'btn-remove';
+    removeBtn.textContent = 'Remove';
+    removeBtn.addEventListener('click', () => window.removeServer(name));
+
+    card.append(info, removeBtn);
     container.appendChild(card);
   });
 }

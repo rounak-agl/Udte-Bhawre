@@ -36,7 +36,8 @@ class McpClientManager extends EventEmitter {
 
       if (guardOk) {
         // Forward guard events for UI consumption
-        this.guard.on('intent-created', (plan) => this.emit('security:intent-created', plan));
+        this.guard.on('intent-sealed', (info) => this.emit('security:intent-sealed', info));
+        this.guard.on('intent-failed', (info) => this.emit('security:intent-failed', info));
         this.guard.on('intent-verified', (tool) => this.emit('security:intent-verified', tool));
         this.guard.on('intent-blocked', (tool, reason) => this.emit('security:intent-blocked', tool, reason));
         this.guard.on('policy-denied', (tool, reason) => this.emit('security:policy-denied', tool, reason));
@@ -86,6 +87,13 @@ class McpClientManager extends EventEmitter {
       return await this.guard.hooks.onLlmInput({ prompt, tools });
     }
     return null;
+  }
+
+  /**
+   * Drop any intent plan from a previous turn. Call at the start of each user turn.
+   */
+  resetIntentPlan() {
+    if (this.guard) this.guard.clearPlan();
   }
 
   /**
@@ -152,6 +160,10 @@ class McpClientManager extends EventEmitter {
         if (error.code === 'INTENT_DRIFT') {
           this.emit('security:enforcement-block', { tool: toolName, reason: 'Tool not in signed intent plan' });
           return { success: false, securityBlock: true, error: 'Blocked — intent drift detected', toolName };
+        }
+        if (error.code === 'NO_INTENT' || error.code === 'VERIFY_UNAVAILABLE') {
+          this.emit('security:enforcement-block', { tool: toolName, reason: error.message });
+          return { success: false, securityBlock: true, error: `Blocked — ${error.message}`, toolName };
         }
         throw error; // Real errors must surface
       }

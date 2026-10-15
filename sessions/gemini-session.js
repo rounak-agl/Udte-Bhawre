@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const spawn = require('cross-spawn'); // no shell: user text must never reach sh/cmd.exe
 const { findBinary, getProcessEnv } = require('../utils/shell-env');
 const fs = require('fs');
 const os = require('os');
@@ -99,7 +99,8 @@ class GeminiSession extends EventEmitter {
         if (fs.existsSync(nodePath)) {
           this.process = spawn(nodePath, [this._entryScript, ...args], {
             cwd: home,
-            env: env,
+            // process.execPath is the Electron binary; this makes it behave as plain Node
+            env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
             stdio: ['pipe', 'pipe', 'pipe'],
             windowsHide: true
           });
@@ -112,7 +113,7 @@ class GeminiSession extends EventEmitter {
           cwd: home,
           env: env,
           stdio: ['pipe', 'pipe', 'pipe'],
-          shell: process.platform === 'win32'
+          windowsHide: true
         });
       }
 

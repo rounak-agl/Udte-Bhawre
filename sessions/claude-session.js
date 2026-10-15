@@ -1,4 +1,4 @@
-const { spawn } = require('child_process');
+const spawn = require('cross-spawn'); // no shell: user text must never reach sh/cmd.exe
 const { findBinary, getProcessEnv } = require('../utils/shell-env');
 const os = require('os');
 const EventEmitter = require('events');
@@ -36,13 +36,13 @@ class ClaudeSession extends EventEmitter {
         '-p',
         '--output-format', 'stream-json',
         '--input-format', 'stream-json',
-        '--verbose',
-        '--dangerously-skip-permissions'
+        // No --dangerously-skip-permissions: in non-interactive mode, tools that need
+        // permission (Bash, Edit, Write) are denied instead of running unattended.
+        '--verbose'
       ], {
         cwd: os.homedir(),
         env: getProcessEnv(),
         stdio: ['pipe', 'pipe', 'pipe'],
-        shell: true,
         windowsHide: true
       });
 

@@ -63,13 +63,8 @@ contextBridge.exposeInMainWorld('assistant', {
   sendStepPanelAction: (action) => ipcRenderer.send('step-panel-action', action),
   onUpdateStepPanelData: (callback) => onChannel('update-step-panel-data', callback),
 
-  // Vision / API key
-  setApiKey: (key) => ipcRenderer.send('set-api-key', key),
-  getApiKey: () => ipcRenderer.invoke('get-api-key'),
-  setElevenLabsApiKey: (key) => ipcRenderer.send('set-eleven-labs-api-key', key),
+  // ElevenLabs key (chat speech-to-text needs it in the renderer).
+  // API-key setters and MCP server config are deliberately NOT exposed here: these
+  // windows render model output, so they only live on the Control Centre bridge.
   getElevenLabsApiKey: () => ipcRenderer.invoke('get-eleven-labs-api-key'),
-
-  // MCP Servers
-  getMcpServers: () => ipcRenderer.invoke('get-mcp-servers'),
-  setMcpServers: (servers) => ipcRenderer.send('set-mcp-servers', servers),
 });

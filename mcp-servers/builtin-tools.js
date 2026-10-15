@@ -19,16 +19,63 @@ function expandTilde(p) {
   return p;
 }
 
+// Credential/key file types that are never readable or writable, wherever they live.
+const BLOCKED_EXTENSIONS = new Set(['.pem', '.key', '.p12', '.pfx', '.kdbx', '.keychain', '.ppk']);
+
+const PATH_DENIED_MESSAGE = 'Access denied: file tools may only use non-hidden files inside your home folder (dotfiles such as ~/.ssh, ~/.config and .env, and key files, are off-limits).';
+
 /**
- * Checks if the path is permitted (Blocked from C: drive)
+ * Resolve symlinks for the longest existing prefix of a path, so a link inside an
+ * allowed folder can't point the tool somewhere else (e.g. ~/notes -> ~/.ssh).
+ */
+function resolveRealPath(p) {
+  let current = path.resolve(p);
+  const rest = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(current), ...rest);
+    } catch (_) {
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(p);
+      rest.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+function isInside(child, root) {
+  const rel = path.relative(root, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/**
+ * Folders the file tools may use: the user's home folder, plus (on Windows) any
+ * drive other than the system drive, which the previous policy also allowed.
+ */
+function getAllowedRoots() {
+  const roots = [resolveRealPath(os.homedir())];
+  if (process.platform === 'win32') {
+    const systemDrive = (process.env.SystemDrive || 'C:').toUpperCase();
+    for (const letter of 'DEFGHIJKLMNOPQRSTUVWXYZ') {
+      const root = `${letter}:\\`;
+      if (`${letter}:` !== systemDrive && fs.existsSync(root)) roots.push(root);
+    }
+  }
+  return roots;
+}
+
+/**
+ * Allowlist check for every file tool: the path must resolve inside an allowed root,
+ * must not pass through any hidden (dot) file or folder, and must not be a key file.
  */
 function isSafePath(targetPath) {
-  const absPath = path.resolve(targetPath);
-  const driveLetter = path.parse(absPath).root.toLowerCase();
-  // Ensure that no drive starting with 'c:' is accessed
-  if (driveLetter.startsWith('c:')) {
-    return false;
-  }
+  if (typeof targetPath !== 'string' || !targetPath.trim()) return false;
+  const realPath = resolveRealPath(expandTilde(targetPath));
+  const root = getAllowedRoots().find(r => isInside(realPath, r));
+  if (!root) return false;
+  const segments = path.relative(root, realPath).split(path.sep).filter(Boolean);
+  if (segments.some(s => s.startsWith('.'))) return false;
+  if (BLOCKED_EXTENSIONS.has(path.extname(realPath).toLowerCase())) return false;
   return true;
 }
 
@@ -78,8 +125,10 @@ function fuzzyFindFile(targetDir, targetBasename) {
     }
 
     // Only return if it's a reasonably close match (e.g., less than ~4 edits)
+    // and the corrected path is itself allowed (e.g. never auto-correct to a dotfile).
     if (bestMatch && bestDistance <= Math.max(3, Math.floor(targetBasename.length * 0.4))) {
-      return path.join(targetDir, bestMatch);
+      const matchPath = path.join(targetDir, bestMatch);
+      if (isSafePath(matchPath)) return matchPath;
     }
   } catch (err) { }
   return null;
@@ -99,7 +148,8 @@ function searchFilesRecursive(dir, query, maxDepth = 4, currentDepth = 0, result
       if (['node_modules', '.git', 'dist', 'build', '.next'].includes(entry.name)) continue;
       
       const fullPath = path.join(dir, entry.name);
-      
+      if (!isSafePath(fullPath)) continue;
+
       if (entry.name.toLowerCase().includes(query.toLowerCase())) {
         results.push(fullPath);
       }
@@ -190,10 +240,27 @@ const builtinTools = [
       },
       required: ['url']
     },
-    requiresApproval: false,
-    async execute({ url }) {
+    // Approval required: a URL can carry data out (e.g. file contents in the query or path)
+    // if the model has been prompt-injected.
+    requiresApproval: true,
+    async execute({ url }, approvalFn) {
+      if (typeof url !== 'string' || !url.trim()) {
+        return { success: false, error: 'No URL provided.' };
+      }
+      url = url.trim();
       if (!url.startsWith('http://') && !url.startsWith('https://')) {
         url = 'https://' + url;
+      }
+      try {
+        new URL(url);
+      } catch (_) {
+        return { success: false, error: `Invalid URL: ${url}` };
+      }
+      if (approvalFn) {
+        const approved = await approvalFn(`Open URL in your browser:\n${url}`);
+        if (!approved) {
+          return { success: false, error: 'User declined opening the URL.' };
+        }
       }
       await shell.openExternal(url);
       return { success: true, url, message: `Opened ${url} in default browser` };
@@ -399,7 +466,7 @@ const builtinTools = [
       properties: {
         directoryPath: {
           type: 'STRING',
-          description: 'Absolute path to the directory to list (e.g. "C:\\\\Users\\\\User\\\\Documents")'
+          description: 'Absolute path to the directory to list (e.g. "~/Documents")'
         }
       },
       required: ['directoryPath']
@@ -408,12 +475,12 @@ const builtinTools = [
     async execute({ directoryPath }) {
       directoryPath = expandTilde(directoryPath);
       if (!isSafePath(directoryPath)) {
-        return { success: false, error: 'ERROR: Access to the C: drive is strictly prohibited for security reasons.' };
+        return { success: false, error: PATH_DENIED_MESSAGE };
       }
       
       try {
         const entries = fs.readdirSync(directoryPath, { withFileTypes: true });
-        const files = entries.map(e => ({
+        const files = entries.filter(e => isSafePath(path.join(directoryPath, e.name))).map(e => ({
           name: e.name,
           type: e.isDirectory() ? 'directory' : 'file',
           size: e.isFile() ? fs.statSync(path.join(directoryPath, e.name)).size : undefined
@@ -447,7 +514,7 @@ const builtinTools = [
     async execute({ filePath }) {
       filePath = expandTilde(filePath);
       if (!isSafePath(filePath)) {
-        return { success: false, error: 'ERROR: Access to the C: drive is strictly prohibited for security reasons.' };
+        return { success: false, error: PATH_DENIED_MESSAGE };
       }
 
       try {
@@ -507,7 +574,7 @@ const builtinTools = [
     async execute({ query, directory }) {
       directory = expandTilde(directory);
       if (!isSafePath(directory)) {
-        return { success: false, error: 'ERROR: Searching inside the C: drive is strictly prohibited for security reasons.' };
+        return { success: false, error: PATH_DENIED_MESSAGE };
       }
       try {
         if (!fs.existsSync(directory)) {
@@ -547,7 +614,7 @@ const builtinTools = [
     async execute({ filePath, content }, approvalFn) {
       filePath = expandTilde(filePath);
       if (!isSafePath(filePath)) {
-        return { success: false, error: 'ERROR: Writing to the C: drive is strictly prohibited for safety and security reasons.' };
+        return { success: false, error: PATH_DENIED_MESSAGE };
       }
 
       if (approvalFn) {
@@ -655,6 +722,10 @@ async function executeTool(name, args, approvalFn) {
 
   try {
     if (tool.requiresApproval) {
+      // Fail closed: never run an approval-gated tool when no one can be asked.
+      if (typeof approvalFn !== 'function') {
+        return { success: false, error: `"${name}" needs user approval, but no approval prompt is available in this session.` };
+      }
       return await tool.execute(args, approvalFn);
     }
     return await tool.execute(args);

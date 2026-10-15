@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, clipboard, dialog, shell } = require('electron');
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-transparent-visuals');
@@ -642,7 +642,50 @@ class Character {
   }
 }
 
-const { initControlCentre, openControlCentre } = require('./main-cc');
+const { initControlCentre, openControlCentre, isControlCentreSender } = require('./main-cc');
+
+// Reject privileged IPC that doesn't come from the Control Centre window.
+function requireControlCentre(event, channel) {
+  if (isControlCentreSender(event)) return true;
+  console.warn(`[IPC] Rejected "${channel}" from a non-Control-Centre window`);
+  return false;
+}
+
+/**
+ * Validate an MCP server map from the renderer: { id: { command, args[], env{} } }.
+ * Returns a clean copy, or null if anything is malformed.
+ */
+function sanitizeMcpServers(servers) {
+  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return null;
+  const clean = {};
+  for (const [id, cfg] of Object.entries(servers)) {
+    if (!/^[\w.-]{1,64}$/.test(id)) return null;
+    if (!cfg || typeof cfg !== 'object') return null;
+    if (typeof cfg.command !== 'string' || !cfg.command.trim()) return null;
+    const args = cfg.args ?? [];
+    if (!Array.isArray(args) || !args.every(a => typeof a === 'string')) return null;
+    const env = cfg.env ?? {};
+    if (typeof env !== 'object' || Array.isArray(env) ||
+        !Object.entries(env).every(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string')) return null;
+    clean[id] = { command: cfg.command.trim(), args: [...args], env: { ...env } };
+  }
+  return clean;
+}
+
+// No window may open child windows or navigate away from the bundled UI. Without this, a
+// target="_blank" link in a chat reply opens a new Electron window that inherits the
+// preload bridge. External http(s)/mailto links go to the system browser instead.
+app.on('web-contents-created', (_event, contents) => {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (/^(https?:\/\/|mailto:)/i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  contents.on('will-navigate', (event, url) => {
+    if (url.startsWith('file://')) return;
+    event.preventDefault();
+    if (/^(https?:\/\/|mailto:)/i.test(url)) shell.openExternal(url);
+  });
+});
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  App Lifecycle
@@ -949,11 +992,20 @@ ipcMain.on('request-position', (event) => {
 });
 
 // ── MCP Servers IPC ──
-ipcMain.handle('get-mcp-servers', () => {
+ipcMain.handle('get-mcp-servers', (event) => {
+  if (!requireControlCentre(event, 'get-mcp-servers')) return {};
   return getMcpServers();
 });
 
-ipcMain.on('set-mcp-servers', (event, servers) => {
+ipcMain.on('set-mcp-servers', (event, rawServers) => {
+  // MCP configs launch arbitrary processes — Control Centre only, and well-formed only.
+  if (!requireControlCentre(event, 'set-mcp-servers')) return;
+  const servers = sanitizeMcpServers(rawServers);
+  if (!servers) {
+    console.warn('[MCP] Rejected malformed MCP server config');
+    return;
+  }
+
   // 1. Save to the JSON file
   setMcpServers(servers);
   console.log('[MCP] Updated server configs in settings file.');
@@ -972,6 +1024,7 @@ ipcMain.on('set-mcp-servers', (event, servers) => {
 
 // ── Vision / Overlay IPC ──
 ipcMain.on('set-api-key', (event, key) => {
+  if (!requireControlCentre(event, 'set-api-key')) return;
   setApiKey(key);
   // Recreate sessions so they use the new key
   characters.forEach(c => {
@@ -987,7 +1040,8 @@ ipcMain.on('set-api-key', (event, key) => {
   });
 });
 
-ipcMain.handle('get-api-key', () => {
+ipcMain.handle('get-api-key', (event) => {
+  if (!requireControlCentre(event, 'get-api-key')) return '';
   return getApiKey();
 });
 
@@ -1006,6 +1060,7 @@ ipcMain.on('set-theme', (event, theme) => {
 });
 
 ipcMain.on('set-provider', (event, providerKey) => {
+  if (!requireControlCentre(event, 'set-provider')) return;
   setCurrentProvider(providerKey);
   characters.forEach(c => {
     if (c.session) {
@@ -1023,6 +1078,7 @@ ipcMain.on('set-provider', (event, providerKey) => {
 });
 
 ipcMain.on('set-eleven-labs-api-key', (event, key) => {
+  if (!requireControlCentre(event, 'set-eleven-labs-api-key')) return;
   setElevenLabsApiKey(key);
 });
 
@@ -1031,10 +1087,12 @@ ipcMain.handle('get-eleven-labs-api-key', () => {
 });
 
 ipcMain.on('set-mongodb-uri', (event, uri) => {
+  if (!requireControlCentre(event, 'set-mongodb-uri')) return;
   setMongodbUri(uri);
 });
 
-ipcMain.handle('get-mongodb-uri', () => {
+ipcMain.handle('get-mongodb-uri', (event) => {
+  if (!requireControlCentre(event, 'get-mongodb-uri')) return '';
   return getMongodbUri();
 });
 
@@ -1164,6 +1222,7 @@ ipcMain.handle('get-agents', async () => {
 });
 
 ipcMain.handle('save-agent', async (event, config) => {
+  if (!requireControlCentre(event, 'save-agent')) return false;
   if (!isDBConnected()) return false;
   try {
     const newAgent = new Agent(config);
@@ -1223,6 +1282,7 @@ function launchAgentInstance(agentObj) {
 }
 
 ipcMain.on('launch-agent', async (event, agentObj) => {
+  if (!requireControlCentre(event, 'launch-agent')) return;
   launchAgentInstance(agentObj);
 });
 
@@ -1244,7 +1304,8 @@ ipcMain.handle('get-history', async () => {
   }
 });
 
-ipcMain.handle('choose-context-file', async () => {
+ipcMain.handle('choose-context-file', async (event) => {
+  if (!requireControlCentre(event, 'choose-context-file')) return null;
   const result = await dialog.showOpenDialog({
     properties: ['openFile'],
     filters: [{ name: 'Markdown', extensions: ['md'] }]
@@ -1314,6 +1375,7 @@ ipcMain.handle('get-chat-messages', async (event, sessionId) => {
 
 // ── Agent Management IPC ──
 ipcMain.handle('delete-agent', async (event, id) => {
+  if (!requireControlCentre(event, 'delete-agent')) return false;
   if (!isDBConnected()) return false;
   try {
     // 1. Find and destroy active character instance if running
