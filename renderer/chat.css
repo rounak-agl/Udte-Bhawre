@@ -512,6 +512,27 @@ html, body {
   color: var(--text-primary);
 }
 
+#provider-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ArmorIQ shield badge */
+#guard-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 100px;
+  white-space: nowrap;
+  cursor: help;
+}
+#guard-badge.guard-active      { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+#guard-badge.guard-unreachable { color: #B7791F;         background: rgba(214, 158, 46, 0.16); }
+#guard-badge.guard-error       { color: var(--error);   background: var(--error-bg); }
+#guard-badge.guard-off         { color: var(--text-muted); background: var(--hover); }
+
 #session-status {
   font-size: 11px;
   color: var(--text-muted);
@@ -549,7 +570,7 @@ html, body {
   opacity: 0.6;
 }
 
-#btn-send, #btn-mic {
+#btn-send, #btn-mic, #btn-tools {
   background: transparent;
   border: none;
   color: var(--text-muted);
@@ -562,6 +583,30 @@ html, body {
   justify-content: center;
   transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
+}
+
+/* Desktop tools toggle: accent when on, muted when off, dimmed when the provider has none */
+#btn-tools.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+#btn-tools:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+#btn-tools.active:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+#btn-tools:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+#btn-tools:focus-visible,
+#btn-mic:focus-visible,
+#btn-send:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 #btn-mic:hover {

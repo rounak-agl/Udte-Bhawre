@@ -16,6 +16,8 @@ const providerCardEmoji = document.getElementById('provider-card-emoji');
 const providerNameEl = document.getElementById('provider-name');
 const providerDot = document.getElementById('provider-dot');
 const sessionStatusEl = document.getElementById('session-status');
+const btnTools = document.getElementById('btn-tools');
+const guardBadge = document.getElementById('guard-badge');
 
 let currentTheme = 'Peach';
 let currentProvider = 'claude';
@@ -97,13 +99,22 @@ function updateProviderUI() {
 // Desktop tools (files, clipboard, URLs, shell…) only exist for Gemini Vision; the CLI
 // providers bring their own, so the toggle is only shown for Vision.
 function updateToolsUI() {
-  const section = document.getElementById('settings-tools-section');
-  if (!section) return;
-  section.style.display = providerInfo(currentProvider).supportsTools ? '' : 'none';
-  const toggle = section.querySelector('[data-tools-toggle]');
-  toggle.classList.toggle('active', toolsEnabled);
-  toggle.querySelector('.item-label').textContent = `Desktop tools: ${toolsEnabled ? 'On' : 'Off'}`;
+  const supported = !!providerInfo(currentProvider).supportsTools;
+  const on = supported && toolsEnabled;
+  btnTools.disabled = !supported;
+  btnTools.classList.toggle('active', on);
+  btnTools.setAttribute('aria-pressed', String(on));
+  const label = !supported
+    ? `Desktop tools are only available with Gemini Vision (${providerInfo(currentProvider).name} uses its own)`
+    : `Desktop tools: ${toolsEnabled ? 'on' : 'off'} — click to turn ${toolsEnabled ? 'off' : 'on'}`;
+  btnTools.title = label;
+  btnTools.setAttribute('aria-label', label);
 }
+
+btnTools.addEventListener('click', () => {
+  // Main replies with 'tools-change' once the agent's session has been updated
+  if (!btnTools.disabled) window.assistant.setChatTools(!toolsEnabled);
+});
 
 // ─── Settings dropdown ───
 function createSettingsDropdown() {
@@ -117,13 +128,6 @@ function createSettingsDropdown() {
   dropdown.innerHTML = `
     <div class="settings-section-title">Provider</div>
     <div id="settings-provider-list"></div>
-    <div id="settings-tools-section">
-      <div class="settings-divider"></div>
-      <div class="settings-section-title">Tools</div>
-      <button class="settings-item" data-tools-toggle>
-        <span class="item-dot"></span><span class="item-label"></span>
-      </button>
-    </div>
     <div class="settings-divider"></div>
     <div class="settings-section-title">Theme</div>
     ${themes.map(t => `
@@ -141,10 +145,6 @@ function createSettingsDropdown() {
     const item = e.target.closest('.settings-item');
     if (!item) return;
 
-    if (item.hasAttribute('data-tools-toggle')) {
-      // Main replies with 'tools-change' once the agent's session has been updated
-      window.assistant.setChatTools(!toolsEnabled);
-    }
 
     if (item.dataset.provider && item.dataset.provider !== currentProvider) {
       // Switches this agent's provider; main replies with 'provider-change'
@@ -232,6 +232,7 @@ window.assistant.onChatInit((state) => {
   currentProvider = state.provider || currentProvider;
   renderProviderList();
   toolsEnabled = state.toolsEnabled !== false;
+  renderGuardBadge(state.guard);
   applyTheme(themeClasses[state.theme] ? state.theme : currentTheme);
 });
 
@@ -314,6 +315,11 @@ function addSecurityEvent(eventPayload) {
         + `<br><span style="opacity:0.8;font-size:11px;">Token: ${safeEscape(data.tokenHash || 'N/A')}</span>`
         + `<br><span style="opacity:0.8;font-size:11px;">Authorized: [${(Array.isArray(data.authorizedTools) ? data.authorizedTools : []).join(', ')}]</span></div>`;
       break;
+    case 'fallback-approved':
+      icon = '✋';
+      bgColor = '#2980B9';
+      messageContent = `<div><strong>Allowed by you</strong><br><span style="opacity:0.85;font-size:11px;">${safeEscape(data.tool || 'Tool')} ran with your approval — ArmorIQ couldn't verify it.</span></div>`;
+      break;
     case 'tool-allowed':
       icon = '✅';
       bgColor = '#2980B9';
@@ -321,24 +327,52 @@ function addSecurityEvent(eventPayload) {
       break;
     case 'enforcement-block': {
       const reason = data.reason || '';
-      if (reason.includes('drift')) {
+      const tool = safeEscape(data.tool || 'This tool');
+      // Older events have no `kind`; infer it from the reason text
+      const kind = data.kind || (/drift|not in .*plan/i.test(reason) ? 'drift'
+        : /intent plan|unreachable|verif/i.test(reason) ? 'unverified' : 'policy');
+      const detail = reason ? `<br><span style="opacity:0.7;font-size:10px;">${safeEscape(reason)}</span>` : '';
+      if (kind === 'declined') {
+        icon = '✋';
+        bgColor = '#7F8C8D';
+        messageContent = `<div><strong>Not run — you declined</strong>`
+          + `<br><span style="opacity:0.85;font-size:11px;">ArmorIQ was unreachable, so ${tool} asked for your OK and you said no.</span></div>`;
+      } else if (kind === 'unverified') {
+        icon = '🔌';
+        bgColor = '#7F8C8D';
+        messageContent = `<div><strong>Blocked — couldn't verify with ArmorIQ</strong>`
+          + `<br><span style="opacity:0.85;font-size:11px;">${tool} wasn't run: tools need ArmorIQ's approval, and it couldn't be reached for this message.</span>${detail}</div>`;
+      } else if (kind === 'drift') {
         icon = '⚠️';
         bgColor = '#E67E22';
-        messageContent = `<div><strong>Blocked — Intent Drift</strong><br><span style="opacity:0.8;font-size:11px;">${safeEscape(data.tool || 'unknown tool')} is not in the signed intent plan</span></div>`;
+        messageContent = `<div><strong>Blocked — not in the approved plan</strong>`
+          + `<br><span style="opacity:0.85;font-size:11px;">${tool} wasn't part of the plan ArmorIQ approved for this message.</span></div>`;
       } else {
         icon = '❌';
         bgColor = '#C0392B';
-        messageContent = `<div><strong>Blocked — Policy Deny</strong><br><span style="opacity:0.8;font-size:11px;">${safeEscape(data.tool || 'unknown tool')} matched deny list</span>`
-          + (reason ? `<br><span style="opacity:0.7;font-size:10px;">Reason: ${safeEscape(reason)}</span>` : '')
-          + `</div>`;
+        messageContent = `<div><strong>Blocked by policy</strong>`
+          + `<br><span style="opacity:0.85;font-size:11px;">${tool} isn't allowed by the security policy.</span>${detail}</div>`;
       }
       break;
     }
-    case 'intent-failed':
-      icon = '❌';
-      bgColor = '#C0392B';
-      messageContent = `<div><strong>Intent Planning Failed</strong><br><span style="opacity:0.8;font-size:11px;">${safeEscape(data.reason || 'Unknown reason')}</span></div>`;
+    case 'intent-failed': {
+      const reason = data.reason || 'Unknown reason';
+      // Connection problems are the common case: say so plainly, keep the raw error small
+      // The guard classifies the failure (`unreachable`); older events fall back to the text
+      const network = typeof data.unreachable === 'boolean'
+        ? data.unreachable
+        : /socket|TLS|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|timed? ?out|network|fetch failed/i.test(reason);
+      icon = network ? '🔌' : '❌';
+      bgColor = network ? '#7F8C8D' : '#C0392B';
+      messageContent = network
+        ? `<div><strong>Couldn't reach ArmorIQ</strong>`
+          + `<br><span style="opacity:0.85;font-size:11px;">Any tool this message needs will ask for your OK (Allow / Deny) instead. Local safety rules still apply.</span>`
+          + `<br><span style="opacity:0.7;font-size:10px;">${safeEscape(reason)}</span></div>`
+        : `<div><strong>ArmorIQ couldn't approve this message</strong>`
+          + `<br><span style="opacity:0.85;font-size:11px;">Tools are blocked for this message.</span>`
+          + `<br><span style="opacity:0.7;font-size:10px;">${safeEscape(reason)}</span></div>`;
       break;
+    }
     default:
       icon = 'ℹ️';
       bgColor = '#555';
@@ -625,6 +659,31 @@ window.assistant.onProvidersChanged((list) => {
   renderProviderList();
   updateProviderUI();
 });
+
+// ─── ArmorIQ shield badge ───
+// Shows whether this agent's desktop tools are protected right now. Hidden when the
+// provider has no desktop tools (or they're off) — there's nothing to guard.
+const GUARD_BADGES = {
+  active:      { text: '🛡 Protected',         tip: 'ArmorIQ verifies every desktop-tool action this agent takes.' },
+  unreachable: { text: '🛡 Asking you',        tip: "ArmorIQ can't be reached right now, so each action asks for your OK (Allow / Deny). Local safety rules still apply." },
+  error:       { text: '🛡 Guard error',       tip: "ArmorIQ couldn't approve this agent's actions, so tools are blocked. Check the key in Control Centre → Settings → Security." },
+  off:         { text: '🛡 Guard off',         tip: 'No ArmorIQ key is set. Add one in Control Centre → Settings → Security. Risky actions still ask for your OK.' }
+};
+
+function renderGuardBadge(status) {
+  const badge = status && GUARD_BADGES[status.state];
+  if (!badge) {
+    guardBadge.hidden = true;
+    return;
+  }
+  guardBadge.hidden = false;
+  guardBadge.className = `guard-${status.state}`;
+  guardBadge.textContent = badge.text;
+  guardBadge.title = status.reason ? `${badge.tip}\n\n${status.reason}` : badge.tip;
+  guardBadge.setAttribute('aria-label', `ArmorIQ: ${badge.text.replace('🛡 ', '')}. ${badge.tip}`);
+}
+
+window.assistant.onGuardStatus(renderGuardBadge);
 
 // The saved conversation was deleted from the Control Centre: the agent starts fresh
 window.assistant.onChatCleared(() => {

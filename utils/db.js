@@ -4,7 +4,11 @@ let isConnected = false;
 
 // Connect to MongoDB
 async function connectDB(uri) {
+  if (mongoose.connection.readyState !== 0) {
+    try { await mongoose.disconnect(); } catch (_) {}
+  }
   if (!uri) {
+    isConnected = false;
     console.log('[DB] No MongoDB URI provided — dashboard/history features disabled.');
     return false;
   }

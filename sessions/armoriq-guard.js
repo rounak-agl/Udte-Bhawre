@@ -22,9 +22,6 @@ const os = require('os');
 
 // ── SDK module references (lazy-loaded in initialize()) ──────────
 let ArmorIQClient = null;
-let IntentMismatchException = null;
-let TokenExpiredException = null;
-let PolicyBlockedException = null;
 
 const DEFAULT_CONFIG = {
   apiKey: '',
@@ -33,10 +30,24 @@ const DEFAULT_CONFIG = {
   contextId: 'default',
   iapEndpoint: 'https://customer-iap.armoriq.ai',
   proxyEndpoint: 'https://customer-proxy.armoriq.ai',
-  backendEndpoint: 'https://customer-api.armoriq.ai',
+  backendEndpoint: 'https://api.armoriq.ai',
   validitySeconds: 300,
   policyPath: path.join(__dirname, '..', 'armoriq.policy.json'),
 };
+
+/**
+ * True when ArmorIQ couldn't be *reached* (connection, TLS, DNS, timeout, 5xx), as
+ * opposed to ArmorIQ answering and refusing. Only reachability failures may fall back
+ * to asking the user; an explicit refusal always blocks.
+ */
+function isConnectivityError(err) {
+  if (!err) return false;
+  const status = err.response?.status ?? err.status ?? err.statusCode;
+  if (typeof status === 'number' && status >= 500) return true;
+  const codes = ['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'ECONNABORTED', 'EPIPE', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET'];
+  if (codes.includes(err.code) || codes.includes(err.cause?.code)) return true;
+  return /socket|TLS|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|timed? ?out|network|fetch failed|unreachable/i.test(err.message || '');
+}
 
 class ArmorIQGuard extends EventEmitter {
   /**
@@ -45,6 +56,10 @@ class ArmorIQGuard extends EventEmitter {
   constructor(config = {}) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
+    // Remap deprecated/broken customer-api.armoriq.ai to the active api.armoriq.ai endpoint
+    if (this.config.backendEndpoint === 'https://customer-api.armoriq.ai' || this.config.backendEndpoint === 'https://customer-proxy.armoriq.ai') {
+      this.config.backendEndpoint = 'https://api.armoriq.ai';
+    }
     this.client = null;
     this.currentToken = null;
     this.currentPlan = null;
@@ -82,19 +97,12 @@ class ArmorIQGuard extends EventEmitter {
       );
       if (fs.existsSync(path.join(sdkDistPath, 'client.js'))) {
         const clientModule = require(path.join(sdkDistPath, 'client.js'));
-        const exceptionsModule = require(path.join(sdkDistPath, 'exceptions.js'));
         ArmorIQClient = clientModule.ArmorIQClient;
-        IntentMismatchException = exceptionsModule.IntentMismatchException;
-        TokenExpiredException = exceptionsModule.TokenExpiredException;
-        PolicyBlockedException = exceptionsModule.PolicyBlockedException;
         console.log('[ArmorIQ] SDK loaded from dist path');
       } else {
         // Fallback: standard require (may work if circular dep is resolved)
         const sdk = require('@armoriq/sdk');
         ArmorIQClient = sdk.ArmorIQClient;
-        IntentMismatchException = sdk.IntentMismatchException;
-        TokenExpiredException = sdk.TokenExpiredException;
-        PolicyBlockedException = sdk.PolicyBlockedException;
         console.log('[ArmorIQ] SDK loaded via standard require');
       }
       this._sdkLoaded = true;
@@ -258,13 +266,17 @@ class ArmorIQGuard extends EventEmitter {
       return plan;
 
     } catch (err) {
-      console.error('[ArmorIQ] ❌ Intent planning failed:', err.message);
-      this._log('plan_failed', 'error', null, { error: err.message });
-      this.emit('intent-failed', { reason: err.message });
+      const unreachable = isConnectivityError(err);
+      console.error(`[ArmorIQ] ❌ Intent planning failed${unreachable ? ' (unreachable)' : ''}:`, err.message);
+      this._log('plan_failed', 'error', null, { error: err.message, unreachable });
+      this.emit('intent-failed', { reason: err.message, unreachable });
       // On planning failure, clear any stale state — fail-closed
       this.currentToken = null;
       this.currentPlan = null;
       this.allowedActions.clear();
+      // Remember why, so tool calls this turn can fall back to asking the user
+      // only when ArmorIQ was unreachable (never when it refused the plan)
+      this.planUnreachable = unreachable;
       return null;
     }
   }
@@ -318,8 +330,14 @@ class ArmorIQGuard extends EventEmitter {
 
     // ── Stage 2: Intent Token Validation (fail-closed) ─────
     if (!this.currentToken || !this.currentPlan) {
-      // The guard is enabled but no plan was sealed for this turn (planning failed
-      // or the IAP backend is unreachable). Block rather than run unverified.
+      if (this.planUnreachable) {
+        // ArmorIQ couldn't be reached to seal a plan: the caller may ask the user instead
+        const reason = 'ArmorIQ is unreachable, so this action could not be verified';
+        this._log('tool_call', 'pending', toolName, { reason, stage: 'intent' });
+        throw Object.assign(new Error(reason), { code: 'GUARD_UNREACHABLE' });
+      }
+      // The guard is enabled but no plan was sealed for this turn (planning failed or
+      // was refused). Block rather than run unverified.
       const reason = 'No sealed intent plan for this turn (fail-closed)';
       this._log('tool_call', 'block', toolName, { reason, stage: 'intent' });
       this.emit('intent-blocked', toolName, reason);
@@ -341,61 +359,60 @@ class ArmorIQGuard extends EventEmitter {
       throw Object.assign(new Error(reason), { code: 'INTENT_DRIFT' });
     }
 
-    // ── Stage 3: SDK invoke() for cryptographic verification ──
-    try {
-      await this.client.invoke(
-        'desktop-assistant',  // MCP name
-        toolName,             // action
-        this.currentToken,    // signed intent token
-        args                  // parameters
-      );
-
-      this._log('tool_call', 'allow', toolName, {
-        stage: 'verified',
-        args: this._sanitizeArgs(args),
-      });
-      this.emit('intent-verified', toolName);
-      console.log(`[ArmorIQ] ⚡ SECURE EXECUTION: ${toolName} validated against signed intent.`);
-      return { allowed: true };
-
-    } catch (err) {
-      let reason = `Verification failed: ${err.message}`;
-      let isHardBlock = false;
-
-      if (IntentMismatchException && err instanceof IntentMismatchException) {
-        reason = `Intent mismatch: ${toolName} does not match token plan`;
-        err.code = 'INTENT_DRIFT';
-        isHardBlock = true;
-      } else if (TokenExpiredException && err instanceof TokenExpiredException) {
-        reason = `Intent token expired for ${toolName}`;
-        err.code = 'INTENT_DRIFT';
-        isHardBlock = true;
-      } else if (PolicyBlockedException && err instanceof PolicyBlockedException) {
-        reason = `Policy blocked: ${toolName}`;
-        err.code = 'POLICY_DENY';
-        isHardBlock = true;
-      }
-
-      this._log('tool_call', isHardBlock ? 'block' : 'warn', toolName, {
-        reason,
-        stage: 'verification',
-        errorType: err.constructor.name,
-      });
-
-      if (isHardBlock) {
-        this.emit(err.code === 'POLICY_DENY' ? 'policy-denied' : 'intent-blocked', toolName, reason);
-        console.log(`[ArmorIQ] ❌ VERIFICATION BLOCKED: ${toolName} — ${reason}`);
-
-        // RE-THROW to be caught by specific execution gate checks
-        throw Object.assign(new Error(reason), { code: err.code, rule: policyResult?.reason || '' });
-      }
-
-
-      // Network/backend error — the call could not be verified, so block it (fail-closed)
-      console.log(`[ArmorIQ] ❌ Backend unreachable — blocking unverified ${toolName}`);
-      this.emit('intent-blocked', toolName, reason);
-      throw Object.assign(new Error(reason), { code: 'VERIFY_UNAVAILABLE' });
+    // ── Stage 3: verify against the token ArmorIQ signed ──
+    // A local check: no network call, nothing executed. (The SDK's client.invoke() is
+    // NOT a verifier — it runs the tool through ArmorIQ's cloud proxy on an MCP server
+    // registered there, which this app's in-process tools are not, so it always failed.)
+    const verdict = this._verifyAgainstToken(this.currentToken, normalizedName);
+    if (!verdict.ok) {
+      this._log('tool_call', 'block', toolName, { reason: verdict.reason, stage: 'verification' });
+      this.emit(verdict.code === 'POLICY_DENY' ? 'policy-denied' : 'intent-blocked', toolName, verdict.reason);
+      console.log(`[ArmorIQ] ❌ VERIFICATION BLOCKED: ${toolName} — ${verdict.reason}`);
+      throw Object.assign(new Error(verdict.reason), { code: verdict.code, rule: verdict.reason });
     }
+
+    this._log('tool_call', 'allow', toolName, {
+      stage: 'verified',
+      tokenId: this.currentToken.tokenId,
+      args: this._sanitizeArgs(args),
+    });
+    this.emit('intent-verified', toolName);
+    console.log(`[ArmorIQ] ⚡ SECURE EXECUTION: ${toolName} validated against signed intent.`);
+    return { allowed: true };
+  }
+
+  /**
+   * Check one tool call against the intent token ArmorIQ issued for this turn:
+   *  - not expired;
+   *  - actually signed (ArmorIQ signature + plan hash present);
+   *  - the tool is a step in the plan ArmorIQ signed (not just our local copy);
+   *  - not excluded by ArmorIQ's server-side policy evaluation, if it returned one.
+   * @returns {{ ok: true } | { ok: false, code: string, reason: string }}
+   */
+  _verifyAgainstToken(token, normalizedName) {
+    if (!token) return { ok: false, code: 'NO_INTENT', reason: 'No intent token for this turn' };
+    if (typeof token.expiresAt === 'number' && Date.now() / 1000 > token.expiresAt) {
+      return { ok: false, code: 'INTENT_DRIFT', reason: 'The approval for this message expired — send it again' };
+    }
+    if (!token.signature || !token.planHash) {
+      return { ok: false, code: 'VERIFY_UNAVAILABLE', reason: 'ArmorIQ returned an unsigned or incomplete intent token' };
+    }
+    const signedSteps = token.rawToken?.plan?.steps || [];
+    const signedActions = signedSteps.map(step => String(step?.action || '').toLowerCase());
+    if (!signedActions.includes(normalizedName)) {
+      return { ok: false, code: 'INTENT_DRIFT', reason: `"${normalizedName}" is not in the plan ArmorIQ signed` };
+    }
+    const pv = token.policyValidation || {};
+    const lower = (list) => (Array.isArray(list) ? list.map(t => String(t).toLowerCase()) : null);
+    const denied = lower(pv.denied_tools);
+    const allowed = lower(pv.allowed_tools);
+    if (denied && denied.includes(normalizedName)) {
+      return { ok: false, code: 'POLICY_DENY', reason: `ArmorIQ policy denies "${normalizedName}"` };
+    }
+    if (allowed && allowed.length > 0 && !allowed.includes(normalizedName)) {
+      return { ok: false, code: 'POLICY_DENY', reason: `ArmorIQ policy does not allow "${normalizedName}"` };
+    }
+    return { ok: true };
   }
 
   // ─── Local Policy Engine ───────────────────────────────────
@@ -490,6 +507,7 @@ class ArmorIQGuard extends EventEmitter {
     this.currentToken = null;
     this.currentPlan = null;
     this.allowedActions.clear();
+    this.planUnreachable = false;
   }
 
   /**
@@ -567,8 +585,23 @@ class ArmorIQGuard extends EventEmitter {
 }
 
 /**
- * Load ArmorIQ config from ~/.openclaw/openclaw.json (the armorclaw plugin section),
- * with ARMORIQ_API_KEY taking precedence. Only keys that are actually set are returned,
+ * Where the ArmorIQ key comes from, highest priority first:
+ *   1. ARMORIQ_API_KEY environment variable (development / CI)
+ *   2. Control Centre → Settings → Security (stored encrypted)
+ *   3. ~/.openclaw/openclaw.json armorclaw plugin config (legacy, plain text)
+ */
+function resolveArmorIQKey(pluginConfig) {
+  if (process.env.ARMORIQ_API_KEY) return { apiKey: process.env.ARMORIQ_API_KEY, keySource: 'env' };
+  const { getArmorIQApiKey } = require('./agent-session');
+  const fromSettings = getArmorIQApiKey();
+  if (fromSettings) return { apiKey: fromSettings, keySource: 'settings' };
+  if (pluginConfig.apiKey) return { apiKey: pluginConfig.apiKey, keySource: 'openclaw' };
+  return { apiKey: '', keySource: null };
+}
+
+/**
+ * Load ArmorIQ config: the key (see resolveArmorIQKey) plus identity/endpoint
+ * settings from ~/.openclaw/openclaw.json's armorclaw plugin section, if present. Only keys that are actually set are returned,
  * so DEFAULT_CONFIG's endpoints aren't overwritten with `undefined` when spread.
  * The policy is always this app's own armoriq.policy.json — never a policyStorePath
  * from a real OpenClaw install, which belongs to that tool.
@@ -587,8 +620,10 @@ function loadArmorIQConfig() {
     console.error('[ArmorIQ] Failed to load openclaw config:', err.message);
   }
 
+  const { apiKey, keySource } = resolveArmorIQKey(pluginConfig);
   const config = {
-    apiKey: process.env.ARMORIQ_API_KEY || pluginConfig.apiKey || '',
+    apiKey,
+    keySource,
     userId: pluginConfig.userId || 'default-user',
     agentId: pluginConfig.agentId || 'openclaw-agent-001',
     contextId: pluginConfig.contextId || 'default',
@@ -600,4 +635,31 @@ function loadArmorIQConfig() {
   return Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined && v !== null && v !== ''));
 }
 
-module.exports = { ArmorIQGuard, loadArmorIQConfig };
+/**
+ * Check ArmorIQ from the Settings page: can we reach it, and does it accept the key?
+ * Uses an authenticated read-only endpoint, so no intent plan is created.
+ * @returns {Promise<{ state: 'ok'|'off'|'invalid'|'unreachable'|'error', message: string }>}
+ */
+async function testArmorIQConnection({ timeoutMs = 8000 } = {}) {
+  const config = new ArmorIQGuard(loadArmorIQConfig()).config; // merged with endpoint defaults
+  if (!config.apiKey) return { state: 'off', message: 'No ArmorIQ key set.' };
+  const base = String(config.backendEndpoint).replace(/\/+$/, '');
+  const host = (() => { try { return new URL(base).host; } catch (_) { return base; } })();
+  try {
+    const res = await fetch(`${base}/mcp/my-servers`, {
+      headers: { 'X-API-Key': config.apiKey },
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (res.ok) return { state: 'ok', message: `Connected to ${host} — key accepted.` };
+    if (res.status === 401 || res.status === 403) {
+      return { state: 'invalid', message: `Connected to ${host}, but the key was rejected (HTTP ${res.status}). Check it in your ArmorIQ dashboard.` };
+    }
+    if (res.status >= 500) return { state: 'unreachable', message: `${host} is having problems (HTTP ${res.status}). Try again later.` };
+    return { state: 'error', message: `${host} answered with HTTP ${res.status}.` };
+  } catch (err) {
+    const detail = err.name === 'TimeoutError' ? 'timed out' : (err.cause?.message || err.message);
+    return { state: 'unreachable', message: `Couldn't reach ${host}: ${detail}. Check your network, VPN or firewall.` };
+  }
+}
+
+module.exports = { ArmorIQGuard, loadArmorIQConfig, isConnectivityError, testArmorIQConnection };

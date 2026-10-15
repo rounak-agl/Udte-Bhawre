@@ -2,7 +2,7 @@
 // in-memory fake of utils/db.js, so main-process behaviour can be driven end to end.
 const path = require('path');
 const { EventEmitter } = require('events');
-const { REPO, stubElectron, quiet, sleep } = require('./helpers');
+const { REPO, stubElectron, quiet, waitFor } = require('./helpers');
 
 function createHarness() {
   const ipcOn = {};
@@ -50,7 +50,7 @@ function createHarness() {
   });
 
   // ── In-memory fake of utils/db.js ──
-  const db = { chats: new Map(), agentsSaved: [], agentsDeleted: [], agentUpdates: [], taskUpdates: [] };
+  const db = { chats: new Map(), agentsSaved: [], agentsDeleted: [], agentUpdates: [], taskUpdates: [], writes: 0 };
   let nextId = 1;
   let clock = Date.now();
   class ChatSession {
@@ -59,6 +59,7 @@ function createHarness() {
       this._id = `cs${nextId++}`;
       this.updatedAt = new Date(++clock);
       db.chats.set(this._id, { ...this });
+      db.writes++;
       return this;
     }
     static findOne(q) {
@@ -73,6 +74,7 @@ function createHarness() {
       if (!db.chats.has(id)) return null;
       const d = { ...db.chats.get(id), ...upd, updatedAt: new Date(++clock) };
       db.chats.set(id, d);
+      db.writes++;
       return d;
     }
     static async findByIdAndDelete(id) { const d = db.chats.get(id); db.chats.delete(id); return d; }
@@ -113,22 +115,23 @@ function createHarness() {
       await quiet(() => this.main.launchAgentInstance(agent));
       return this.lastWindow();
     },
-    /** Click a character; returns the chat window that opens. */
+    /** Click a character; resolves with its chat window once that has loaded (got chat-init). */
     async openChat(charWin) {
+      const existing = new Set(windows);
       await quiet(async () => {
         ipcOn['character-clicked']({ sender: charWin.webContents });
-        await sleep(60);
+        await waitFor(() => windows.some(w => !existing.has(w) && sentTo(w, 'chat-init').length > 0));
       });
-      return this.lastWindow();
+      return windows.find(w => !existing.has(w) && sentTo(w, 'chat-init').length > 0);
     },
-    /** Send a chat message and wait for the turn to finish. */
+    /** Send a chat message; resolves once the turn finished AND it was saved to the DB. */
     async chat(chatWin, text) {
-      const before = sentTo(chatWin, 'chat-turn-complete').length;
+      const turnsBefore = sentTo(chatWin, 'chat-turn-complete').length;
+      const writesBefore = db.writes;
       await quiet(async () => {
         ipcOn['chat-send']({ sender: chatWin.webContents }, text);
-        const start = Date.now();
-        while (sentTo(chatWin, 'chat-turn-complete').length <= before && Date.now() - start < 3000) await sleep(20);
-        await sleep(40); // let the queued save finish
+        await waitFor(() => sentTo(chatWin, 'chat-turn-complete').length > turnsBefore);
+        await waitFor(() => db.writes > writesBefore);
       });
     }
   };

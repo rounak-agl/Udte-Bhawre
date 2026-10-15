@@ -26,6 +26,7 @@ class SettingsStore {
     this._apiKey = '';            // Gemini key (Gemini Vision); kept under its original name
     this._providerApiKeys = {};   // { claude, codex, copilot }
     this._elevenLabsApiKey = '';
+    this._armoriqApiKey = '';     // ArmorIQ guard key (Settings → Security)
     this._mcpServers = {};
     this._customModels = [];      // user-added local models: [{ id, name, type: 'ollama', model, baseUrl }]
     this._load();
@@ -39,6 +40,7 @@ class SettingsStore {
       this._apiKey = store.apiKey || '';
       this._providerApiKeys = (store.providerApiKeys && typeof store.providerApiKeys === 'object') ? store.providerApiKeys : {};
       this._elevenLabsApiKey = store.elevenLabsApiKey || '';
+      this._armoriqApiKey = store.armoriqApiKey || '';
       this._mongodbUri = store.mongodbUri || '';
       this._mcpServers = store.mcpServers || {};
       this._customModels = Array.isArray(store.customModels) ? store.customModels : [];
@@ -54,6 +56,7 @@ class SettingsStore {
       apiKey: this._apiKey,
       providerApiKeys: this._providerApiKeys,
       elevenLabsApiKey: this._elevenLabsApiKey,
+      armoriqApiKey: this._armoriqApiKey,
       mongodbUri: this._mongodbUri,
       mcpServers: this._mcpServers,
       customModels: this._customModels
@@ -79,6 +82,9 @@ class SettingsStore {
   get elevenLabsApiKey() { return reveal(this._elevenLabsApiKey); }
   set elevenLabsApiKey(v) { this._elevenLabsApiKey = seal(v); this._save(); }
 
+  get armoriqApiKey() { return reveal(this._armoriqApiKey); }
+  set armoriqApiKey(v) { this._armoriqApiKey = seal(v); this._save(); }
+
   // The URI can embed a username and password, so it is treated as a secret too
   get mongodbUri() { return reveal(this._mongodbUri); }
   set mongodbUri(v) { this._mongodbUri = seal(v); this._save(); }
@@ -98,6 +104,7 @@ class SettingsStore {
     };
     this._apiKey = upgrade(this._apiKey);
     this._elevenLabsApiKey = upgrade(this._elevenLabsApiKey);
+    this._armoriqApiKey = upgrade(this._armoriqApiKey);
     this._mongodbUri = upgrade(this._mongodbUri);
     this._providerApiKeys = Object.fromEntries(Object.entries(this._providerApiKeys).map(([p, v]) => [p, upgrade(v)]));
     this._mcpServers = mapMcpEnv(this._mcpServers, upgrade);
@@ -190,6 +197,15 @@ function migrateSecrets() {
   return settings.migrateSecrets();
 }
 
+/** ArmorIQ guard key entered in Settings (see armoriq-guard.js for precedence). */
+function getArmorIQApiKey() {
+  return settings.armoriqApiKey;
+}
+
+function setArmorIQApiKey(key) {
+  settings.armoriqApiKey = key;
+}
+
 function getElevenLabsApiKey() {
   return settings.elevenLabsApiKey;
 }
@@ -230,6 +246,8 @@ module.exports = {
   getAllProviderApiKeys,
   getProviderEnv,
   migrateSecrets,
+  getArmorIQApiKey,
+  setArmorIQApiKey,
   getElevenLabsApiKey,
   setElevenLabsApiKey,
   getMongodbUri,

@@ -131,6 +131,9 @@ class McpClientManager extends EventEmitter {
    */
   async executeToolCall(toolName, args) {
     console.log('[GATE] Tool attempted:', toolName);
+    // Set when the user already approved this call in the ArmorIQ-unreachable fallback,
+    // so a tool that normally asks (shell, file write, URL) doesn't ask a second time
+    let approvedByUser = false;
     
     // ── ArmorIQ Security Gate ────────────────────────────
     if (!this.guard || !this.guard.enabled) {
@@ -152,20 +155,41 @@ class McpClientManager extends EventEmitter {
         }
         this.emit('security:tool-allowed', { tool: toolName, timestamp: Date.now() });
       } catch (error) {
-        // Precise error code handling
+        // Each block carries a `kind` so the UI can say what actually happened:
+        //   policy     — deny list, allow list, or a dangerous argument pattern
+        //   drift      — tool not in the plan ArmorIQ sealed for this message
+        //   unverified — no plan / verification failed, so nothing can be verified (fail-closed)
+        //   declined   — ArmorIQ was unreachable and the user said no in the fallback prompt
         if (error.code === 'POLICY_DENY') {
-          this.emit('security:enforcement-block', { tool: toolName, reason: 'Policy deny list match', rule: error.rule });
-          return { success: false, securityBlock: true, error: 'Blocked by policy: ' + toolName, toolName };
+          const rule = error.rule || error.message;
+          this.emit('security:enforcement-block', { tool: toolName, kind: 'policy', reason: rule });
+          return { success: false, securityBlock: true, error: `Blocked by policy: ${rule}`, toolName };
         }
         if (error.code === 'INTENT_DRIFT') {
-          this.emit('security:enforcement-block', { tool: toolName, reason: 'Tool not in signed intent plan' });
-          return { success: false, securityBlock: true, error: 'Blocked — intent drift detected', toolName };
+          this.emit('security:enforcement-block', { tool: toolName, kind: 'drift', reason: error.message });
+          return { success: false, securityBlock: true, error: 'Blocked — not in the approved plan for this message', toolName };
         }
-        if (error.code === 'NO_INTENT' || error.code === 'VERIFY_UNAVAILABLE') {
-          this.emit('security:enforcement-block', { tool: toolName, reason: error.message });
+        if (error.code === 'GUARD_UNREACHABLE') {
+          // ArmorIQ couldn't be reached (not a refusal): ask the user instead of blocking.
+          // Local policy already passed (it runs before this). No prompt available → block.
+          const approved = this._approvalFn
+            ? await this._approvalFn(this._describeForApproval(toolName, args))
+            : false;
+          this.guard._log('tool_call', approved ? 'allow' : 'block', toolName, {
+            stage: 'fallback-approval', reason: approved ? 'Approved by user (ArmorIQ unreachable)' : 'Declined by user (ArmorIQ unreachable)'
+          });
+          if (!approved) {
+            this.emit('security:enforcement-block', { tool: toolName, kind: 'declined', reason: this._approvalFn ? 'You declined it' : 'No approval prompt available' });
+            return { success: false, securityBlock: true, error: 'Not run — ArmorIQ was unreachable and the action was not approved', toolName };
+          }
+          approvedByUser = true;
+          this.emit('security:fallback-approved', { tool: toolName, timestamp: Date.now() });
+        } else if (error.code === 'NO_INTENT' || error.code === 'VERIFY_UNAVAILABLE') {
+          this.emit('security:enforcement-block', { tool: toolName, kind: 'unverified', reason: error.message });
           return { success: false, securityBlock: true, error: `Blocked — ${error.message}`, toolName };
+        } else {
+          throw error; // Real errors must surface
         }
-        throw error; // Real errors must surface
       }
     }
 
@@ -174,7 +198,8 @@ class McpClientManager extends EventEmitter {
     // Check built-in tools first
     if (isBuiltinTool(toolName)) {
       this.emit('toolExecuting', toolName, args);
-      const result = await executeTool(toolName, args, this._approvalFn);
+      const approval = approvedByUser ? async () => true : this._approvalFn;
+      const result = await executeTool(toolName, args, approval);
       this.emit('toolComplete', toolName, result);
       return result;
     }
@@ -201,6 +226,18 @@ class McpClientManager extends EventEmitter {
     }
 
     return { success: false, error: `Unknown tool: ${toolName}` };
+  }
+
+  /** The Allow/Deny prompt text for a tool call that ArmorIQ couldn't verify. */
+  _describeForApproval(toolName, args) {
+    let shown;
+    try {
+      shown = JSON.stringify(args ?? {}, null, 2);
+    } catch (_) {
+      shown = '(arguments could not be displayed)';
+    }
+    if (shown.length > 1200) shown = shown.slice(0, 1200) + '\n…';
+    return `ArmorIQ couldn't be reached to verify this action, so it needs your OK.\n\nTool: ${toolName}\nArguments:\n${shown}`;
   }
 
   /**

@@ -54,6 +54,33 @@ test('send waits for MCP/guard startup before generating', async () => {
   assert.strictEqual(initDoneAtGenerate, true);
 });
 
+test('a blocked tool ends the turn with no duplicate reply text or tool-result line', async () => {
+  const v = new VisionSession(null, { toolsEnabled: true });
+  v.mcpClient.initialize = async () => {};
+  v.mcpClient.getAllFunctionDeclarations = () => [{ name: 'compose_email', description: 'x', parameters: { type: 'OBJECT', properties: {} } }];
+  v.mcpClient.createIntentPlan = async () => null;
+  v.mcpClient.executeToolCall = async () => ({ success: false, securityBlock: true, error: 'Blocked — No sealed intent plan' });
+  const texts = [], toolResults = [];
+  let turns = 0;
+  v.on('text', t => texts.push(t));
+  v.on('toolResult', r => toolResults.push(r));
+  v.on('turnComplete', () => turns++);
+  v.on('error', () => {});
+  v.start('fake-key');
+  v.ai = {
+    models: {
+      generateContentStream: async () => (async function* () {
+        yield { functionCalls: [{ name: 'compose_email', args: { to: 'a@b.c' } }], candidates: [{ content: { parts: [{ functionCall: { name: 'compose_email' } }] } }] };
+      })()
+    }
+  };
+  await v.send('draft an email');
+  assert.strictEqual(turns, 1);
+  assert.deepStrictEqual(texts, [], 'the security banner is the only notice');
+  assert.deepStrictEqual(toolResults, []);
+  assert.ok(v.history.some(h => h.role === 'toolResult' && h.text.startsWith('SECURITY BLOCK')), 'still recorded in history');
+});
+
 test('restored conversation becomes model context (alternating, user first)', async () => {
   const v = new VisionSession(null, { toolsEnabled: false });
   v.mcpClient.initialize = async () => {};

@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('assistant', {
   onChatInit: (callback) => onChannel('chat-init', callback),
   onToolsChange: (callback) => onChannel('tools-change', callback),
   onProvidersChanged: (callback) => onChannel('providers-changed', callback),
+  onGuardStatus: (callback) => onChannel('guard-status', callback),
   onChatCleared: (callback) => onChannel('chat-cleared', callback),
   sendMessage: (msg) => ipcRenderer.send('chat-send', msg),
   onChatText: (callback) => onChannel('chat-text', callback),

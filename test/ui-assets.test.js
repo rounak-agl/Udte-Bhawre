@@ -40,8 +40,26 @@ test('chat ⚙ menu builds provider buttons without innerHTML', () => {
   assert.ok(!/\$\{p\.name\}/.test(chatJs.slice(chatJs.indexOf('dropdown.innerHTML'), chatJs.indexOf('container.appendChild(dropdown)'))));
 });
 
+test('desktop tools toggle sits next to the message box (not in the ⚙ menu)', () => {
+  const html = fs.readFileSync(path.join(renderer, 'chat.html'), 'utf8');
+  const inputArea = html.slice(html.indexOf('id="input-area"'), html.indexOf('id="btn-send"'));
+  assert.ok(/<button id="btn-tools"[^>]*aria-pressed=/.test(inputArea), 'toggle button in the input area');
+  const chatJs = fs.readFileSync(path.join(renderer, 'chat.js'), 'utf8');
+  assert.ok(!chatJs.includes('settings-tools-section') && !chatJs.includes('data-tools-toggle'), 'no second toggle in the ⚙ menu');
+  assert.ok(css.includes('#btn-tools.active') && css.includes('#btn-tools:disabled'));
+});
+
+test('ArmorIQ shield badge: in the chat status bar, text-only rendering', () => {
+  const html = fs.readFileSync(path.join(renderer, 'chat.html'), 'utf8');
+  assert.ok(/<span id="guard-badge"[^>]*role="status"[^>]*hidden/.test(html));
+  const chatJs = fs.readFileSync(path.join(renderer, 'chat.js'), 'utf8');
+  const render = chatJs.slice(chatJs.indexOf('function renderGuardBadge'), chatJs.indexOf('window.assistant.onGuardStatus'));
+  assert.ok(render.includes('textContent') && !render.includes('innerHTML'), 'reason text comes from the network');
+  for (const state of ['active', 'unreachable', 'error', 'off']) assert.ok(css.includes(`#guard-badge.guard-${state}`), state);
+});
+
 test('removed Gemini CLI provider is gone from the UI and sessions', () => {
   assert.ok(!fs.existsSync(path.join(REPO, 'sessions/gemini-session.js')));
   const agentsJs = fs.readFileSync(path.join(renderer, 'control-centre/pages/agents/agents-page.js'), 'utf8');
-  assert.ok(!agentsJs.includes('Gemini CLI'));
+  assert.ok(!/['"`]Gemini CLI['"`]/.test(agentsJs), 'no "Gemini CLI" option label');
 });

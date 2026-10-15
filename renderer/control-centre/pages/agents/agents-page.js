@@ -18,9 +18,12 @@ function AgentsPage() {
 
   // Agents currently on the desktop (launched), by id
   let runningIds = new Set();
-  // Provider key → display name (built-ins + local models)
-  let providerNames = {};
-  const providerName = (key) => providerNames[key === 'gemini' ? 'vision' : (key || 'vision')] || key || 'Gemini Vision';
+  // Providers (built-ins + local models) and the default for new agents
+  let providerList = [];
+  let defaultProvider = 'vision';
+  const resolveKey = (key) => (key === 'gemini' ? 'vision' : (key || defaultProvider)); // Gemini CLI was removed
+  const providerName = (key) => providerList.find(p => p.key === resolveKey(key))?.name || key || 'Gemini Vision';
+  const providerOptionLabel = (p) => (p.kind === 'ollama' ? `${p.name} — local (${p.model})` : p.name);
 
   async function loadAgents() {
     if (window.ccBridge) {
@@ -31,7 +34,8 @@ function AgentsPage() {
           window.ccBridge.getProviders()
         ]);
         runningIds = new Set((state?.agents || []).map(a => String(a.id)));
-        providerNames = Object.fromEntries((providers || []).map(p => [p.key, p.name]));
+        providerList = providers || [];
+        defaultProvider = state?.provider || 'vision';
         renderAgents(agents || []);
       } catch (e) {
         renderAgents([]);
@@ -59,7 +63,8 @@ function AgentsPage() {
       
       const info = pfCreateElement('div', 'pf-agent-info');
       info.appendChild(pfCreateElement('div', 'pf-agent-name', { textContent: agent.name }));
-      info.appendChild(pfCreateElement('div', 'pf-agent-role', { textContent: providerName(agent.provider) }));
+      const role = pfCreateElement('div', 'pf-agent-role', { textContent: providerName(agent.provider) });
+      info.appendChild(role);
       cardHeader.appendChild(info);
       
       const status = pfCreateElement('div', `pf-agent-status ${isLaunched ? 'active' : ''}`, 
@@ -75,7 +80,31 @@ function AgentsPage() {
         row.appendChild(pfCreateElement('span', 'pf-agent-detail-value', { textContent: val || '--' }));
         return row;
       };
-      details.appendChild(makeRow('Provider', providerName(agent.provider)));
+      // Each agent has its own provider — change it here (applies live if it's running)
+      const providerRow = pfCreateElement('label', 'pf-agent-detail-row');
+      providerRow.appendChild(pfCreateElement('span', 'pf-agent-detail-label', { textContent: 'Provider' }));
+      const providerSelect = pfCreateElement('select', 'pf-input pf-select pf-agent-provider-select', { 'aria-label': `Provider for ${agent.name}` });
+      const current = resolveKey(agent.provider);
+      const known = providerList.some(p => p.key === current);
+      [...(known ? [] : [{ key: current, name: `${current} (unavailable)` }]), ...providerList].forEach(p => {
+        const opt = pfCreateElement('option', '', { value: p.key, textContent: p.model ? providerOptionLabel(p) : p.name });
+        if (p.key === current) opt.selected = true;
+        providerSelect.appendChild(opt);
+      });
+      providerSelect.onchange = async () => {
+        const key = providerSelect.value;
+        const ok = window.ccBridge && await window.ccBridge.setAgentProvider(String(agent._id), key);
+        if (ok) {
+          agent.provider = key;
+          role.textContent = providerName(key);
+          window.PFToast.show('Provider updated', `${agent.name} now uses ${providerName(key)}${isLaunched ? ' — conversation kept' : ''}.`);
+        } else {
+          providerSelect.value = current;
+          window.PFToast.show('Error', `Could not change ${agent.name}'s provider.`);
+        }
+      };
+      providerRow.appendChild(providerSelect);
+      details.appendChild(providerRow);
       details.appendChild(makeRow('Theme', agent.theme || 'Midnight'));
       card.appendChild(details);
 
@@ -139,11 +168,12 @@ function AgentsPage() {
     const provider = makeSelect('Provider', [['vision', 'Gemini Vision']], 'vision');
     box.appendChild(provider.group);
     if (window.ccBridge) {
-      window.ccBridge.getProviders().then(list => {
-        provider.select.replaceChildren(...list.map(p => pfCreateElement('option', '', {
-          value: p.key,
-          textContent: p.kind === 'ollama' ? `${p.name} — local (${p.model})` : p.name
-        })));
+      Promise.all([window.ccBridge.getProviders(), window.ccBridge.getInitialState()]).then(([list, state]) => {
+        provider.select.replaceChildren(...list.map(p => {
+          const opt = pfCreateElement('option', '', { value: p.key, textContent: providerOptionLabel(p) });
+          if (p.key === state?.provider) opt.selected = true; // pre-select the default
+          return opt;
+        }));
       }).catch(() => {});
     }
 

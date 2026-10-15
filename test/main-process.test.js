@@ -139,6 +139,79 @@ test('custom models: Control Centre only; open chats see the new provider list',
   assert.match(h.sentTo(chatM, 'chat-error').at(-1).args[0], /no longer available/);
 });
 
+test('each bot has its own provider (Agents page, chat ⚙ menu, tray)', async () => {
+  const charP = await h.launch({ _id: 'P', name: 'Pea', provider: 'codex', theme: 'Moss' });
+  const charQ = await h.launch({ _id: 'Q', name: 'Queue', provider: 'claude', theme: 'Moss' });
+  const chatP = await h.openChat(charP);
+  const chatQ = await h.openChat(charQ);
+  assert.strictEqual(h.sentTo(chatP, 'chat-init')[0].args[0].provider, 'codex');
+  assert.strictEqual(h.sentTo(chatQ, 'chat-init')[0].args[0].provider, 'claude');
+
+  // Agents page → only that bot changes, live, and it's saved on the agent
+  const set = (sender, id, key) => quiet(() => h.ipcHandle['set-agent-provider']({ sender }, id, key));
+  assert.strictEqual(await set(chatP.webContents, 'P', 'copilot'), false, 'refused from a chat window');
+  assert.strictEqual(await set(cc.webContents, 'P', 'nope'), false, 'unknown provider refused');
+  assert.strictEqual(await set(cc.webContents, 'P', 'copilot'), true);
+  assert.strictEqual(h.sentTo(chatP, 'provider-change').at(-1).args[0], 'copilot');
+  assert.strictEqual(h.sentTo(chatQ, 'provider-change').length, 0, 'other bot untouched');
+  assert.ok(h.db.agentUpdates.some(([id, u]) => id === 'P' && u.provider === 'copilot'));
+
+  // Changing the default for new agents doesn't touch bots that have their own
+  await quiet(async () => { h.ipcOn['set-provider']({ sender: cc.webContents }, 'vision'); await sleep(20); });
+  assert.strictEqual(h.sentTo(chatP, 'provider-change').length, 1);
+  assert.strictEqual(h.sentTo(chatQ, 'provider-change').length, 0);
+
+  // Tray: one submenu per bot, with that bot's own provider checked
+  const template = h.main.trayMenuTemplate();
+  const itemFor = (name) => template.find(i => i.label && i.label.startsWith(name));
+  const checked = (item) => item.submenu.find(i => i.type === 'radio' && i.checked)?.label;
+  assert.strictEqual(checked(itemFor('Pea')), 'Copilot');
+  assert.strictEqual(checked(itemFor('Queue')), 'Claude');
+  assert.ok(template.some(i => i.label === 'Default provider for new agents'));
+
+  // Picking a provider in a bot's tray submenu switches just that bot
+  await quiet(async () => { itemFor('Queue').submenu.find(i => i.label === 'Codex').click(); await sleep(20); });
+  assert.strictEqual(h.sentTo(chatQ, 'provider-change').at(-1).args[0], 'codex');
+  assert.strictEqual(h.sentTo(chatP, 'provider-change').length, 1);
+});
+
+test("ArmorIQ is visible: chat shield badge follows the guard's state", async () => {
+  const sessions = [];
+  const CodexSession = require(path.join(REPO, 'sessions/codex-session.js'));
+  const origStart = CodexSession.prototype.start;
+  CodexSession.prototype.start = function () { sessions.push(this); return origStart.call(this); };
+
+  const charG = await h.launch({ _id: 'G', name: 'Gee', provider: 'codex', theme: 'Moss' });
+  const chatG = await h.openChat(charG);
+  const session = sessions.at(-1);
+  const badge = () => h.sentTo(chatG, 'guard-status').at(-1)?.args[0];
+
+  assert.strictEqual(badge() ?? null, null, 'no desktop tools to guard → no badge');
+  session.emit('security:intent-failed', { reason: 'socket disconnected', unreachable: true });
+  assert.deepStrictEqual(badge(), { state: 'unreachable', reason: 'socket disconnected' });
+  session.emit('security:intent-sealed', { authorizedTools: ['compose_email'] });
+  assert.strictEqual(badge().state, 'active');
+  session.emit('security:intent-failed', { reason: 'Unauthorized', unreachable: false });
+  assert.strictEqual(badge().state, 'error');
+
+  // A reopened chat shows the current state straight away
+  chatG.destroy();
+  const chatG2 = await h.openChat(charG);
+  assert.strictEqual(h.sentTo(chatG2, 'chat-init')[0].args[0].guard.state, 'error');
+  CodexSession.prototype.start = origStart;
+});
+
+test('ArmorIQ key: set from Settings only, applied to guarded chats', async () => {
+  assert.strictEqual(await quiet(() => h.ipcHandle['set-armoriq-key']({ sender: {} }, 'k')), false, 'refused outside the Control Centre');
+  assert.strictEqual(await quiet(() => h.ipcHandle['get-armoriq-key']({ sender: {} })), '');
+  assert.strictEqual(await quiet(() => h.ipcHandle['set-armoriq-key'](CC(), '  ak_new_key  ')), true);
+  assert.strictEqual(await quiet(() => h.ipcHandle['get-armoriq-key'](CC())), 'ak_new_key', 'trimmed and stored');
+  const sec = await quiet(() => h.ipcHandle['get-security-overview'](CC()));
+  assert.strictEqual(sec.guard.active, true);
+  assert.match(sec.guard.keySource, /this page/);
+  assert.strictEqual(await quiet(() => h.ipcHandle['test-armoriq']({ sender: {} })), null);
+});
+
 test('settings overview endpoints are Control Centre only', async () => {
   const sec = await quiet(() => h.ipcHandle['get-security-overview'](CC()));
   assert.ok(Array.isArray(sec.approvalTools) && sec.approvalTools.includes('run_shell_command') && sec.approvalTools.includes('open_url'));

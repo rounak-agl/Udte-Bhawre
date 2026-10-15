@@ -39,3 +39,10 @@ test('ArmorIQ config: env key works without openclaw.json; endpoint defaults sur
   assert.strictEqual(guard.config.iapEndpoint, 'https://customer-iap.armoriq.ai');
   assert.strictEqual(cfg.policyPath, path.join(REPO, 'armoriq.policy.json'));
 });
+
+test('connectDB: reconnects or clears connection on URI update without throw', async () => {
+  const { connectDB, isDBConnected } = require(path.join(REPO, 'utils/db.js'));
+  assert.strictEqual(await quiet(() => connectDB('')), false);
+  assert.strictEqual(isDBConnected(), false);
+});
+

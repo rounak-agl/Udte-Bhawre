@@ -88,6 +88,15 @@ class VisionSession extends EventEmitter {
   }
 
   /**
+   * Whether ArmorIQ guards this session's desktop tools (for the chat's shield badge).
+   * Not covered when tools are off — there is nothing to guard.
+   */
+  guardStatus() {
+    if (!this.toolsEnabled) return { covered: false };
+    return { covered: true, enabled: !!(this.mcpClient.guard && this.mcpClient.guard.enabled) };
+  }
+
+  /**
    * Seed the model's context with an earlier conversation (carried over from a previous
    * session, or restored from the database) so the agent remembers it.
    */
@@ -124,6 +133,7 @@ class VisionSession extends EventEmitter {
       this.mcpClient.on('security:intent-failed', (data) => this.emit('security:intent-failed', data));
       this.mcpClient.on('security:tool-allowed', (data) => this.emit('security:tool-allowed', data));
       this.mcpClient.on('security:enforcement-block', (data) => this.emit('security:enforcement-block', data));
+      this.mcpClient.on('security:fallback-approved', (data) => this.emit('security:fallback-approved', data));
 
       this.isRunning = true;
       this.emit('sessionReady');
@@ -333,8 +343,8 @@ class VisionSession extends EventEmitter {
 
         // ── CIRCUIT BREAKER: Security block → terminate turn immediately ──
         if (result.securityBlock) {
-          this.emit('text', `\n\n🛡️ **Security Intervention:** The agent attempted an unauthorized action \`${toolName}\` and was blocked by ArmorIQ.\n> ${result.error}\n`);
-          this.emit('toolResult', result.error, true);
+          // The chat already shows one security banner for this block (with the real
+          // reason), so no extra reply text / tool-result line here — just record it.
           this.history.push({ role: 'toolResult', text: `SECURITY BLOCK: ${result.error}` });
           console.log(`[VisionSession] 🛡️ CIRCUIT BREAKER: Terminated turn due to security block on ${toolName}`);
           securityTerminated = true;

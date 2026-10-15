@@ -76,14 +76,131 @@ test('ArmorIQ guard: fails closed, blocks drift, plans reset per turn', async ()
     try { await quiet(() => guard.onToolExecution(tool, args)); return 'allowed'; } catch (e) { return e.code; }
   };
   assert.strictEqual(await outcome('get_current_time'), 'NO_INTENT');
-  guard.currentToken = { token: 't' };
-  guard.currentPlan = { steps: [] };
-  guard.allowedActions = new Set(['read_file']);
-  assert.strictEqual(await outcome('open_url', { url: 'https://x' }), 'INTENT_DRIFT');
-  guard.client = { invoke: async () => { throw new Error('ECONNREFUSED'); } };
-  assert.strictEqual(await outcome('read_file', { filePath: '~/x' }), 'VERIFY_UNAVAILABLE');
+
+  // A token shaped like the one ArmorIQ's /iap/sdk/token returns
+  const signedToken = (overrides = {}) => ({
+    tokenId: 'tok-1', planHash: 'abc123', signature: 'sig', expiresAt: Date.now() / 1000 + 300,
+    rawToken: { plan: { steps: [{ action: 'read_file' }, { action: 'compose_email' }] } },
+    policyValidation: undefined,
+    ...overrides
+  });
+  const useToken = (token) => {
+    guard.currentToken = token;
+    guard.currentPlan = token.rawToken.plan;
+    guard.allowedActions = new Set(token.rawToken.plan.steps.map(s => s.action));
+  };
+  // Verification is local: the SDK's invoke() (which would run the tool on ArmorIQ's
+  // cloud proxy) must never be called
+  guard.client = { invoke: async () => { throw new Error('invoke() must not be called'); } };
+
+  useToken(signedToken());
+  assert.strictEqual(await outcome('compose_email', { to: 'a@b.c' }), 'allowed', 'tool in the signed plan is allowed');
+  assert.strictEqual(await outcome('open_url', { url: 'https://x' }), 'INTENT_DRIFT', 'tool outside the plan is blocked');
+
+  useToken(signedToken({ expiresAt: Date.now() / 1000 - 1 }));
+  assert.strictEqual(await outcome('read_file', { filePath: '~/x' }), 'INTENT_DRIFT', 'expired approval');
+
+  useToken(signedToken({ signature: '' }));
+  assert.strictEqual(await outcome('read_file', { filePath: '~/x' }), 'VERIFY_UNAVAILABLE', 'unsigned token');
+
+  // Our local allow-set says yes, but ArmorIQ's signed plan doesn't contain the tool
+  const tampered = signedToken();
+  useToken(tampered);
+  guard.allowedActions.add('run_shell_command');
+  assert.strictEqual(await outcome('run_shell_command', { command: 'ls' }), 'INTENT_DRIFT', 'checked against the SIGNED plan');
+
+  useToken(signedToken({ policyValidation: { denied_tools: ['compose_email'] } }));
+  assert.strictEqual(await outcome('compose_email'), 'POLICY_DENY', "ArmorIQ's server-side policy is honoured");
+  useToken(signedToken({ policyValidation: { allowed_tools: ['read_file'] } }));
+  assert.strictEqual(await outcome('compose_email'), 'POLICY_DENY');
+  assert.strictEqual(await outcome('read_file', { filePath: '~/x' }), 'allowed');
+
   guard.clearPlan();
-  assert.ok(!guard.currentToken && !guard.currentPlan && guard.allowedActions.size === 0);
+  assert.ok(!guard.currentToken && !guard.currentPlan && guard.allowedActions.size === 0 && !guard.planUnreachable);
+});
+
+test('ArmorIQ unreachable vs refused: only unreachable may fall back to asking', async () => {
+  const { isConnectivityError } = require(path.join(REPO, 'sessions/armoriq-guard.js'));
+  assert.ok(isConnectivityError(new Error('Failed to get intent token: Client network socket disconnected before secure TLS connection was established')));
+  assert.ok(isConnectivityError(Object.assign(new Error('x'), { code: 'ENOTFOUND' })));
+  assert.ok(isConnectivityError({ message: 'Service Unavailable', response: { status: 503 } }));
+  assert.ok(!isConnectivityError({ message: 'Unauthorized', response: { status: 401 } }));
+  assert.ok(!isConnectivityError(new Error('Plan rejected by policy')));
+
+  const guard = new ArmorIQGuard({ apiKey: 'x' });
+  guard.policy = { allow: [], deny: [] };
+  guard.enabled = true;
+  const outcome = async (tool, args = {}) => {
+    try { await quiet(() => guard.onToolExecution(tool, args)); return 'allowed'; } catch (e) { return e.code; }
+  };
+  const planFails = async (err) => {
+    guard.clearPlan();
+    guard.client = { capturePlan: () => ({}), getIntentToken: async () => { throw err; } };
+    await quiet(() => guard.onLlmInput({ prompt: 'p', tools: [{ name: 'compose_email' }] }));
+  };
+
+  await planFails(new Error('Failed to get intent token: Client network socket disconnected before secure TLS connection was established'));
+  assert.strictEqual(await outcome('compose_email', { to: 'a@b.c' }), 'GUARD_UNREACHABLE');
+  assert.strictEqual(await outcome('run_shell_command', { command: 'sudo rm -rf /' }), 'POLICY_DENY', 'local policy still applies');
+
+  await planFails(Object.assign(new Error('Unauthorized'), { response: { status: 401 } }));
+  assert.strictEqual(await outcome('compose_email', { to: 'a@b.c' }), 'NO_INTENT', 'a refusal still blocks');
+});
+
+test('fallback: unverifiable tools ask once; yes runs it, no blocks it', async () => {
+  const McpClientManager = require(path.join(REPO, 'sessions/mcp-client.js'));
+  const mc = new McpClientManager();
+  const events = [];
+  mc.on('security:enforcement-block', b => events.push(['block', b.kind]));
+  mc.on('security:fallback-approved', b => events.push(['approved', b.tool]));
+  mc.guard = {
+    enabled: true,
+    _log() {},
+    hooks: { onToolExecution: async () => { throw Object.assign(new Error('ArmorIQ is unreachable'), { code: 'GUARD_UNREACHABLE' }); } }
+  };
+
+  // Approved: runs, and a tool that normally asks (shell) does NOT ask a second time
+  const prompts = [];
+  mc.setApprovalFunction(async (msg) => { prompts.push(msg); return true; });
+  const ran = await quiet(() => mc.executeToolCall('run_shell_command', { command: 'echo fallback-ok' }));
+  assert.strictEqual(prompts.length, 1, 'one prompt, not two');
+  assert.match(prompts[0], /ArmorIQ couldn't be reached/);
+  assert.match(prompts[0], /echo fallback-ok/, 'the prompt shows what will run');
+  assert.strictEqual(ran.success, true);
+  assert.match(ran.stdout, /fallback-ok/);
+
+  // Declined: not run, reported as declined
+  mc.setApprovalFunction(async () => false);
+  const declined = await quiet(() => mc.executeToolCall('run_shell_command', { command: 'echo should-not-run' }));
+  assert.ok(declined.securityBlock && !declined.stdout);
+
+  // No way to ask: stays blocked (fail-closed)
+  mc.setApprovalFunction(null);
+  const noPrompt = await quiet(() => mc.executeToolCall('get_current_time', {}));
+  assert.ok(noPrompt.securityBlock);
+
+  assert.deepStrictEqual(events, [['approved', 'run_shell_command'], ['block', 'declined'], ['block', 'declined']]);
+});
+
+test('blocks are reported with their real cause (policy / drift / unverified)', async () => {
+  const McpClientManager = require(path.join(REPO, 'sessions/mcp-client.js'));
+  const blocks = [];
+  const mc = new McpClientManager();
+  mc.on('security:enforcement-block', b => blocks.push(b));
+  const failWith = (code, message, rule) => {
+    mc.guard = { enabled: true, hooks: { onToolExecution: async () => { throw Object.assign(new Error(message), { code, rule }); } } };
+  };
+  failWith('NO_INTENT', 'No sealed intent plan for this turn (fail-closed)');
+  const r1 = await quiet(() => mc.executeToolCall('compose_email', {}));
+  failWith('POLICY_DENY', 'x', 'Security Block: Prohibited pattern "sudo" detected in arguments.');
+  const r2 = await quiet(() => mc.executeToolCall('run_shell_command', { command: 'sudo ls' }));
+  failWith('INTENT_DRIFT', 'Intent drift: "open_url" not in approved plan');
+  await quiet(() => mc.executeToolCall('open_url', {}));
+
+  assert.deepStrictEqual(blocks.map(b => b.kind), ['unverified', 'policy', 'drift']);
+  assert.ok(r1.securityBlock && r2.securityBlock);
+  assert.ok(!/deny list/i.test(blocks[0].reason), 'an unreachable ArmorIQ is not reported as a deny-list match');
+  assert.match(blocks[1].reason, /Prohibited pattern "sudo"/, 'policy blocks say which rule matched');
 });
 
 test('markdown: no attribute breakout, only http(s)/mailto links', () => {

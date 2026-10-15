@@ -14,7 +14,7 @@ runBootstrap();
 
 const { getTaskbarGeometry } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
-const { getCurrentProvider, setCurrentProvider, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getElevenLabsApiKey, setElevenLabsApiKey, getMongodbUri, setMongodbUri, getMcpServers, setMcpServers, API_KEY_PROVIDERS, apiKeyProviderFor, getAllProviderApiKeys, setProviderApiKey, migrateSecrets } = require('./sessions/agent-session');
+const { getCurrentProvider, setCurrentProvider, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getElevenLabsApiKey, setElevenLabsApiKey, getMongodbUri, setMongodbUri, getMcpServers, setMcpServers, API_KEY_PROVIDERS, apiKeyProviderFor, getAllProviderApiKeys, setProviderApiKey, migrateSecrets, getArmorIQApiKey, setArmorIQApiKey } = require('./sessions/agent-session');
 const { status: secretStatus } = require('./utils/secret-store');
 const { connectDB, isDBConnected, Agent, ChatSession, Task } = require('./utils/db');
 const {
@@ -45,6 +45,35 @@ function defaultProviderKey() {
 /** The provider an agent actually uses: its own, else the default. */
 function providerFor(char) {
   return char.provider ? resolveProviderKey(char.provider) : defaultProviderKey();
+}
+
+/**
+ * Give one bot its own provider (chat ⚙ menu, Agents page and tray all use this).
+ * A running bot switches immediately and keeps its conversation; the choice is saved
+ * on the agent so it survives restarts. Works for agents that aren't running too.
+ */
+async function setAgentProvider(agentId, providerKey) {
+  if (!isKnownProvider(providerKey)) return false;
+  const key = resolveProviderKey(providerKey);
+  const char = characters.find(c => c.agentId && c.agentId === String(agentId));
+  if (char) {
+    char.provider = key;
+    if (char.chatWindow && !char.chatWindow.isDestroyed()) {
+      char.chatWindow.webContents.send('provider-change', key);
+      char.chatWindow.webContents.send('chat-turn-complete');
+    }
+    if (char.session) char.createSession();
+  }
+  if (agentId && isDBConnected()) {
+    try {
+      await Agent.findByIdAndUpdate(agentId, { provider: key });
+    } catch (err) {
+      console.error('[DB] Failed to save agent provider:', err.message);
+      return false;
+    }
+  }
+  rebuildTrayMenu();
+  return true;
 }
 
 /** Ask the user before a desktop tool runs something risky (shell, file write, URL). */
@@ -172,6 +201,8 @@ class Character {
     this.historyLoaded = Promise.resolve();
     this._saveChain = Promise.resolve();
 
+    this.guardState = null; // ArmorIQ shield badge state (see setGuardState)
+
     // Security banners for this agent, held until its chat window is ready
     this.chatReady = false;
     this.pendingSecurityEvents = [];
@@ -279,7 +310,8 @@ class Character {
         theme: this.theme || getCurrentTheme(),
         provider: providerFor(this),
         providers: listProviders(),
-        toolsEnabled: this.toolsEnabled !== false
+        toolsEnabled: this.toolsEnabled !== false,
+        guard: this.guardState
       });
 
       // Replay the conversation so reopening the chat continues where it left off
@@ -316,6 +348,7 @@ class Character {
     }
     this.stopThinking();
 
+    this.setGuardState(null); // known again once the new session is ready
     // The registry knows every provider (built-in CLIs/APIs and user-added local models)
     this.session = createProviderSession(providerKey, {
       screenCapture,
@@ -360,15 +393,25 @@ class Character {
     });
 
     // ── Security events (ArmorIQ) ──
-    this.session.on('security:intent-sealed', (data) => emitSecurityEventToUI('intent-sealed', data, this));
-    this.session.on('security:intent-failed', (data) => emitSecurityEventToUI('intent-failed', data, this));
+    this.session.on('security:intent-sealed', (data) => {
+      emitSecurityEventToUI('intent-sealed', data, this);
+      this.setGuardState('active');
+    });
+    this.session.on('security:intent-failed', (data) => {
+      emitSecurityEventToUI('intent-failed', data, this);
+      this.setGuardState(data && data.unreachable ? 'unreachable' : 'error', data && data.reason);
+    });
     this.session.on('security:tool-allowed', (data) => emitSecurityEventToUI('tool-allowed', data, this));
     this.session.on('security:enforcement-block', (data) => emitSecurityEventToUI('enforcement-block', data, this));
+    this.session.on('security:fallback-approved', (data) => emitSecurityEventToUI('fallback-approved', data, this));
 
     this.session.on('sessionReady', () => {
       if (this.chatWindow && !this.chatWindow.isDestroyed()) {
         this.chatWindow.webContents.send('chat-session-ready');
       }
+      // Is this agent's desktop-tool use guarded by ArmorIQ? (null = nothing to guard)
+      const gs = typeof this.session.guardStatus === 'function' ? this.session.guardStatus() : null;
+      this.setGuardState(gs && gs.covered ? (gs.enabled ? 'active' : 'off') : null);
     });
 
     this.session.on('turnComplete', () => {
@@ -402,6 +445,17 @@ class Character {
     }
     // The Gemini key is only used by Gemini Vision; other sessions ignore the argument
     this.session.start(getApiKey());
+  }
+
+  /**
+   * Track ArmorIQ's state for this agent and show it on its chat's shield badge:
+   * 'active' | 'off' (no key) | 'unreachable' (asking you instead) | 'error' | null (not applicable).
+   */
+  setGuardState(state, reason) {
+    this.guardState = state ? { state, reason: reason || '' } : null;
+    if (this.chatWindow && !this.chatWindow.isDestroyed()) {
+      this.chatWindow.webContents.send('guard-status', this.guardState);
+    }
   }
 
   /**
@@ -837,21 +891,46 @@ function rebuildTrayMenu() {
   // Agents are restored from the DB before the tray exists; setupTray() builds the
   // menu once it does. Throwing here used to abort startup after the first agent.
   if (!tray) return;
+  tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate()));
+}
+
+const providerMenuLabel = (p) => (p.kind === 'ollama' ? `${p.name} (local)` : p.name);
+
+/** The tray menu. Each bot has its own submenu: visibility and its own provider. */
+function trayMenuTemplate() {
   const allProviders = listProviders();
-  const currentProviderKey = defaultProviderKey();
+  const defaultKey = defaultProviderKey();
   const currentThemeName = getCurrentTheme();
   const themes = ['Peach', 'Midnight', 'Cloud', 'Moss'];
 
   const template = [
-    ...characters.map((char, index) => ({
-      label: char.name || `Agent ${index + 1}`,
-      type: 'checkbox',
-      checked: char.manuallyVisible ?? true,
-      click: () => {
-        char.setManuallyVisible(!char.manuallyVisible);
-        rebuildTrayMenu();
-      }
-    })),
+    ...characters.map((char, index) => {
+      const own = providerFor(char);
+      return {
+        label: `${char.name || `Agent ${index + 1}`} — ${allProviders.find(p => p.key === own)?.name || own}`,
+        submenu: [
+          {
+            label: 'Show on desktop',
+            type: 'checkbox',
+            checked: char.manuallyVisible ?? true,
+            click: () => {
+              char.setManuallyVisible(!char.manuallyVisible);
+              rebuildTrayMenu();
+            }
+          },
+          { type: 'separator' },
+          { label: 'Provider', enabled: false },
+          ...allProviders.map(p => ({
+            label: providerMenuLabel(p),
+            type: 'radio',
+            checked: p.key === own,
+            click: () => {
+              if (char.agentId) setAgentProvider(char.agentId, p.key);
+            }
+          }))
+        ]
+      };
+    }),
     { type: 'separator' },
     {
       label: 'Sounds',
@@ -860,21 +939,14 @@ function rebuildTrayMenu() {
       click: () => { toggleSounds(); rebuildTrayMenu(); }
     },
     {
-      label: 'Provider',
+      // Only pre-selects the provider for new agents; each bot keeps its own
+      label: 'Default provider for new agents',
       submenu: allProviders.map(p => ({
-        label: p.name,
+        label: providerMenuLabel(p),
         type: 'radio',
-        checked: p.key === currentProviderKey,
+        checked: p.key === defaultKey,
         click: () => {
           setCurrentProvider(p.key);
-          // Recreate open sessions with the new provider
-          restartSessions(c => {
-            if (c.chatWindow && !c.chatWindow.isDestroyed()) {
-              c.chatWindow.webContents.send('provider-change', providerFor(c));
-              // Clear any stale typing indicators
-              c.chatWindow.webContents.send('chat-turn-complete');
-            }
-          });
           rebuildTrayMenu();
         }
       }))
@@ -945,8 +1017,7 @@ function rebuildTrayMenu() {
     }
   ];
 
-  const menu = Menu.buildFromTemplate(template);
-  tray.setContextMenu(menu);
+  return template;
 }
 
 
@@ -1042,21 +1113,15 @@ function charForChatSender(event) {
 // The conversation carries over to the new provider.
 ipcMain.on('chat-set-provider', async (event, providerKey) => {
   const char = charForChatSender(event);
-  if (!char || !isKnownProvider(providerKey)) return;
+  if (!char || !char.agentId) return;
+  await setAgentProvider(char.agentId, providerKey);
+});
 
-  char.provider = providerKey;
-  char.chatWindow.webContents.send('provider-change', providerKey);
-  char.chatWindow.webContents.send('chat-turn-complete');
-  char.createSession();
-
-  // Persist for agents stored in the database
-  if (char.agentId && isDBConnected()) {
-    try {
-      await Agent.findByIdAndUpdate(char.agentId, { provider: providerKey });
-    } catch (err) {
-      console.error('[DB] Failed to save agent provider:', err.message);
-    }
-  }
+// Agents page: change an agent's own provider (running or not)
+ipcMain.handle('set-agent-provider', async (event, agentId, providerKey) => {
+  if (!requireControlCentre(event, 'set-agent-provider')) return false;
+  if (typeof agentId !== 'string' || !agentId) return false;
+  return setAgentProvider(agentId, providerKey);
 });
 
 // Tools toggle in a chat popover: enables/disables desktop tools for that agent only.
@@ -1182,11 +1247,14 @@ ipcMain.on('set-provider', (event, providerKey) => {
   if (!requireControlCentre(event, 'set-provider')) return;
   if (!isKnownProvider(providerKey)) return;
   setCurrentProvider(resolveProviderKey(providerKey));
-  restartSessions(c => {
+  // Only bots without a provider of their own follow the default
+  characters.forEach(c => {
+    if (c.provider || !c.session) return;
     if (c.chatWindow && !c.chatWindow.isDestroyed()) {
       c.chatWindow.webContents.send('provider-change', providerFor(c));
       c.chatWindow.webContents.send('chat-turn-complete');
     }
+    c.createSession();
   });
   rebuildTrayMenu();
 });
@@ -1236,6 +1304,29 @@ ipcMain.handle('remove-custom-model', (event, id) => {
   return true;
 });
 
+// ── ArmorIQ guard: key + connection test (Settings → Security) ──
+ipcMain.handle('get-armoriq-key', (event) => {
+  if (!requireControlCentre(event, 'get-armoriq-key')) return '';
+  return getArmorIQApiKey();
+});
+
+ipcMain.handle('set-armoriq-key', (event, key) => {
+  if (!requireControlCentre(event, 'set-armoriq-key')) return false;
+  if (typeof key !== 'string' || key.length > 500) return false;
+  setArmorIQApiKey(key.trim());
+  // Only sessions with guarded desktop tools use the key: restart those (conversation kept)
+  characters.forEach(c => {
+    if (c.session && typeof c.session.guardStatus === 'function') c.createSession();
+  });
+  return true;
+});
+
+ipcMain.handle('test-armoriq', async (event) => {
+  if (!requireControlCentre(event, 'test-armoriq')) return null;
+  const { testArmorIQConnection } = require('./sessions/armoriq-guard');
+  return testArmorIQConnection();
+});
+
 // ── Settings → Security & About (read-only) ──
 ipcMain.handle('get-security-overview', (event) => {
   if (!requireControlCentre(event, 'get-security-overview')) return null;
@@ -1250,10 +1341,16 @@ ipcMain.handle('get-security-overview', (event) => {
     policy = { allow: parsed.allow || [], deny: parsed.deny || [] };
   } catch (_) { /* shown as empty */ }
   const armor = loadArmorIQConfig();
+  const keySources = {
+    env: 'the ARMORIQ_API_KEY environment variable',
+    settings: 'this page (stored encrypted)',
+    openclaw: `${path.join(os.homedir(), '.openclaw', 'openclaw.json')} (legacy, plain text — save a key here to replace it)`
+  };
   return {
     guard: {
       active: !!armor.apiKey,
-      keySource: process.env.ARMORIQ_API_KEY ? 'ARMORIQ_API_KEY environment variable' : path.join(os.homedir(), '.openclaw', 'openclaw.json')
+      keySource: keySources[armor.keySource] || null,
+      envOverride: armor.keySource === 'env'
     },
     policy: { ...policy, path: policyPath },
     approvalTools: builtinTools.filter(t => t.requiresApproval).map(t => t.name),
@@ -1287,9 +1384,10 @@ ipcMain.handle('get-eleven-labs-api-key', () => {
   return getElevenLabsApiKey();
 });
 
-ipcMain.on('set-mongodb-uri', (event, uri) => {
+ipcMain.on('set-mongodb-uri', async (event, uri) => {
   if (!requireControlCentre(event, 'set-mongodb-uri')) return;
   setMongodbUri(uri);
+  await connectDB(uri);
 });
 
 ipcMain.handle('get-mongodb-uri', (event) => {
@@ -1673,4 +1771,4 @@ ipcMain.handle('delete-agent', async (event, id) => {
   }
 });
 
-module.exports = { launchAgentInstance, openControlCentre };
+module.exports = { launchAgentInstance, openControlCentre, trayMenuTemplate };

@@ -107,3 +107,16 @@
   margin-top: auto;
   padding-top: var(--pf-spacing-lg);
 }
+
+/* Per-agent provider picker on each card */
+.pf-agent-detail-row:has(.pf-agent-provider-select) {
+  align-items: center;
+  gap: var(--pf-spacing-sm);
+}
+.pf-agent-provider-select {
+  width: auto;
+  max-width: 65%;
+  height: 32px;
+  padding: 0 var(--pf-spacing-sm);
+  font-size: var(--pf-font-size-caption);
+}

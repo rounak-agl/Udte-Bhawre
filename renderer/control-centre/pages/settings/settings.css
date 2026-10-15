@@ -247,3 +247,10 @@
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ArmorIQ "Test connection" result */
+.pf-armoriq-test:empty { display: none; }
+.pf-armoriq-test.is-ok { color: var(--pf-color-success); }
+.pf-armoriq-test.is-invalid,
+.pf-armoriq-test.is-error { color: var(--pf-color-danger); }
+.pf-armoriq-test.is-unreachable { color: var(--pf-color-warning); }

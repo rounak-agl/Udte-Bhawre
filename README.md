@@ -81,7 +81,13 @@ The model then appears as a provider for agents and in every chat's ⚙ menu. Lo
 | Copilot | `copilot` CLI | Optional — otherwise your GitHub login |
 | Custom (Ollama) | Local Ollama server | None |
 
+Every agent has its own provider. Change it on the **Agents** page, from the agent's chat **⚙** menu, or in the tray under the agent's name; the conversation carries over. **Settings → Default provider** only pre-selects the provider for new agents. In a Gemini Vision chat, the 🔧 button next to the message box turns that agent's desktop tools on or off.
+
 Keys are encrypted at rest with your OS keychain (Electron `safeStorage`).
+
+### 🛡 ArmorIQ guard
+
+Desktop tools are protected by ArmorIQ. Add your key in **Control Centre → Settings → Security** and use **Test connection** to check it. Each chat shows the guard's live state as a badge: **Protected**, **Asking you** (ArmorIQ unreachable, so each action asks for Allow / Deny), **Guard error**, or **Guard off**. The `ARMORIQ_API_KEY` environment variable overrides the Settings key for development.
 
 ---
 

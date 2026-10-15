@@ -43,11 +43,11 @@ function SettingsPage() {
   
   // 1. Default provider — built-ins plus the user's local models (from the registry)
   const providerGroup = window.pfCreateElement('div', 'pf-form-group');
-  providerGroup.appendChild(window.pfCreateElement('label', 'pf-input-label', { textContent: 'Default LLM Provider', for: 'default-provider' }));
+  providerGroup.appendChild(window.pfCreateElement('label', 'pf-input-label', { textContent: 'Default provider for new agents', for: 'default-provider' }));
   const providerSelect = window.pfCreateElement('select', 'pf-input pf-select', { id: 'default-provider' });
   providerGroup.appendChild(providerSelect);
   providerGroup.appendChild(window.pfCreateElement('div', 'pf-form-desc', {
-    textContent: 'Used by agents that don\'t have their own provider. Each chat can also switch its agent\'s provider from the ⚙ menu.'
+    textContent: 'Pre-selected when you create an agent. Every agent keeps its own provider — change it on the Agents page, in its chat\'s ⚙ menu, or from the tray.'
   }));
   generalSection.appendChild(providerGroup);
 
@@ -68,7 +68,7 @@ function SettingsPage() {
     const key = providerSelect.value;
     window.store.set('provider', key);
     if (window.ccBridge) window.ccBridge.setProvider(key);
-    window.PFToast.show('Provider Updated', `Default provider is now ${providerSelect.selectedOptions[0]?.textContent || key}.`);
+    window.PFToast.show('Default updated', `New agents will start with ${providerSelect.selectedOptions[0]?.textContent || key}.`);
   };
   refreshProviderSelect().catch(() => {});
 
@@ -314,39 +314,78 @@ function SettingsPage() {
   findModels().catch(() => {});
   content.appendChild(modelsSection);
 
-  // --- SECURITY & ACCESS (read-only overview of what actually protects you) ---
+  // --- SECURITY & ACCESS: the ArmorIQ guard (configurable) + what protects you ---
   const secSection = window.pfCreateElement('div', 'pf-settings-section', { id: 'settings-security' });
   secSection.appendChild(el('h2', 'pf-settings-section-title', 'Security & Access'));
-  secSection.appendChild(el('p', 'pf-form-desc', 'A read-only summary of the protections currently in effect.'));
+  secSection.appendChild(el('p', 'pf-form-desc', 'How your agents are kept safe when they act on your computer.'));
   const secBody = el('div', 'pf-info-list');
   secSection.appendChild(secBody);
-  if (window.ccBridge) {
-    window.ccBridge.getSecurityOverview().then(s => {
-      if (!s) return;
-      const card = (title, ...children) => {
-        const c = el('div', 'pf-info-card');
-        c.appendChild(el('h3', 'pf-info-card-title', title));
-        c.append(...children);
-        return c;
-      };
-      const guardStatus = el('div', `pf-status ${s.guard.active ? 'is-ok' : 'is-off'}`, s.guard.active ? '● Active' : '○ Not active');
-      secBody.append(
-        card('ArmorIQ intent guard', guardStatus, el('p', 'pf-form-desc', s.guard.active
-          ? `Each turn's tool calls are sealed into a signed intent plan; anything outside it, or unverifiable, is blocked. Key from: ${s.guard.keySource}.`
-          : `Add an ArmorIQ API key (ARMORIQ_API_KEY, or ${s.guard.keySource}) to enable it. Until then the protections below still apply.`)),
-        card('Policy (armoriq.policy.json)',
-          el('div', 'pf-info-label', 'Always blocked'), chips(s.policy.deny, 'None'),
-          el('div', 'pf-info-label', 'Allowed tools'), chips(s.policy.allow, 'All tools (no allow-list set)'),
-          el('p', 'pf-form-desc', `Edit ${s.policy.path} to change these; restart to apply.`)),
-        card('Ask before running', chips(s.approvalTools, 'Nothing'),
-          el('p', 'pf-form-desc', 'These desktop tools show an Allow / Deny prompt every time.')),
-        card('File access', el('p', 'pf-info-value', s.fileAccess)),
-        card('Stored secrets', el('p', 'pf-info-value', s.secrets.encrypted
-          ? `Encrypted with your system keychain${s.secrets.backend ? ` (${s.secrets.backend})` : ''}.`
-          : 'Not encrypted — no system keychain available (file is owner-only).'))
-      );
-    }).catch(() => secBody.appendChild(el('p', 'pf-form-desc', 'Could not load the security overview.')));
-  }
+
+  const card = (title, ...children) => {
+    const c = el('div', 'pf-info-card');
+    c.appendChild(el('h3', 'pf-info-card-title', title));
+    c.append(...children);
+    return c;
+  };
+
+  // Connection test result, shown under the key field
+  const testStatus = el('div', 'pf-form-desc pf-armoriq-test', '');
+  const runArmorIQTest = async () => {
+    testStatus.className = 'pf-form-desc pf-armoriq-test';
+    testStatus.textContent = 'Testing…';
+    const r = await window.ccBridge.testArmorIQ();
+    if (!r) return;
+    const icon = { ok: '✅', off: '○', invalid: '❌', unreachable: '🔌', error: '⚠️' }[r.state] || '';
+    testStatus.classList.add(`is-${r.state}`);
+    testStatus.textContent = `${icon} ${r.message}`;
+  };
+
+  const renderSecurity = () => window.ccBridge.getSecurityOverview().then(s => {
+    if (!s) return;
+    secBody.replaceChildren();
+
+    // ArmorIQ guard: status, key, connection test
+    const guardStatus = el('div', `pf-status ${s.guard.active ? 'is-ok' : 'is-off'}`, s.guard.active ? '● Active' : '○ Off — add a key to turn it on');
+    const keyField = secretField({
+      id: 'armoriq-key',
+      label: 'ArmorIQ API key',
+      placeholder: 'ak_live_…',
+      desc: s.guard.envOverride
+        ? 'Note: the ARMORIQ_API_KEY environment variable is set and takes priority over this field.'
+        : 'Get a key from your ArmorIQ dashboard. Stored encrypted; open chats pick it up right away.',
+      load: () => window.ccBridge.getArmorIQKey(),
+      save: async (value) => {
+        await window.ccBridge.setArmorIQKey(value);
+        await renderSecurity();
+        if (value) runArmorIQTest();
+      },
+      savedMessage: 'ArmorIQ key updated.'
+    });
+    const testBtn = window.PFButton({ label: 'Test connection', variant: 'secondary', size: 'sm' });
+    testBtn.onclick = runArmorIQTest;
+    const testRow = el('div', 'pf-form-row');
+    testRow.append(testBtn);
+
+    secBody.append(
+      card('ArmorIQ guard', guardStatus,
+        el('p', 'pf-form-desc', 'Before an agent uses a desktop tool, ArmorIQ seals the actions it is allowed to take for that message; anything else is blocked. ' +
+          "If ArmorIQ can't be reached, each action asks for your OK (Allow / Deny) instead. Every chat shows the guard's state with a 🛡 badge."),
+        keyField, testRow, testStatus,
+        s.guard.active ? el('p', 'pf-form-desc', `Key in use: from ${s.guard.keySource}.`) : el('span', '')),
+      card('Policy (armoriq.policy.json)',
+        el('div', 'pf-info-label', 'Always blocked'), chips(s.policy.deny, 'None'),
+        el('div', 'pf-info-label', 'Allowed tools'), chips(s.policy.allow, 'All tools (no allow-list set)'),
+        el('p', 'pf-form-desc', `Edit ${s.policy.path} to change these; restart to apply.`)),
+      card('Ask before running', chips(s.approvalTools, 'Nothing'),
+        el('p', 'pf-form-desc', 'These desktop tools show an Allow / Deny prompt every time.')),
+      card('File access', el('p', 'pf-info-value', s.fileAccess)),
+      card('Stored secrets', el('p', 'pf-info-value', s.secrets.encrypted
+        ? `Encrypted with your system keychain${s.secrets.backend ? ` (${s.secrets.backend})` : ''}.`
+        : 'Not encrypted — no system keychain available (file is owner-only).'))
+    );
+  }).catch(() => secBody.replaceChildren(el('p', 'pf-form-desc', 'Could not load the security overview.')));
+
+  if (window.ccBridge) renderSecurity();
   content.appendChild(secSection);
 
   // --- ABOUT ---

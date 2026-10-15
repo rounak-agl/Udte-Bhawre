@@ -72,10 +72,20 @@
           <span id="provider-dot"></span>
           <span id="provider-name">Claude</span>
         </div>
-        <span id="session-status">Ready</span>
+        <div id="provider-bar-right">
+          <!-- ArmorIQ guard state for this agent's desktop tools; filled in by chat.js -->
+          <span id="guard-badge" role="status" hidden></span>
+          <span id="session-status">Ready</span>
+        </div>
       </div>
       <div id="input-area">
         <textarea id="input-field" placeholder="Ask Claude anything..." autocomplete="off" spellcheck="false" rows="1"></textarea>
+        <!-- Desktop tools (files, clipboard, URLs, shell…) for this agent; state set by chat.js -->
+        <button id="btn-tools" type="button" aria-pressed="true" title="Desktop tools: on">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+          </svg>
+        </button>
         <button id="btn-mic" title="Hold to speak (or hold Space while the message box is empty)" aria-label="Hold to speak">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"></path>
