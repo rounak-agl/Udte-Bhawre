@@ -31,7 +31,7 @@ const { installNavigationGuards } = require('./app/security');
 const { launchAgentInstance, syncAgentsWithDB } = require('./app/agents');
 const { startWalkLoop } = require('./app/character');
 const { setupTray, trayMenuTemplate } = require('./app/tray');
-const { createOverlayWindow, destroyOverlay, registerOverlayIpc } = require('./app/overlay');
+const { destroyOverlay, registerOverlayIpc } = require('./app/overlay');
 const { openControlCentre, registerControlCentreIpc } = require('./app/control-centre');
 const { registerChatIpc } = require('./app/ipc/chat');
 const { registerAgentIpc } = require('./app/ipc/agents');
@@ -77,7 +77,7 @@ app.whenReady().then(async () => {
   openControlCentre('dashboard');
   setupTray();
   startWalkLoop();
-  createOverlayWindow();
+  // The step-guide overlay is created when a guide is first shown (app/overlay.js)
 });
 
 app.on('window-all-closed', () => {

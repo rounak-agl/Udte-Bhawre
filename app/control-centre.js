@@ -1,5 +1,4 @@
 const { BrowserWindow, ipcMain } = require('electron');
-const state = require('./state');
 const { rendererFile, webPreferences, PRELOAD_CC } = require('./paths');
 
 /**
@@ -50,13 +49,10 @@ function openControlCentre(page = 'dashboard') {
     ccWindow.show();
   });
 
-  // Closing hides it (tray app); it really closes when the app quits
-  ccWindow.on('close', (e) => {
-    if (!state.isQuitting) {
-      e.preventDefault();
-      ccWindow.hide();
-    }
-  });
+  // Closing really closes it: a hidden Control Centre kept a whole renderer process
+  // (~115 MB) alive all day. The app keeps running in the tray, and the tray / a bot
+  // reopens it in about half a second.
+  ccWindow.on('closed', () => { ccWindow = null; });
 }
 
 /**

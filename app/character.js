@@ -138,6 +138,7 @@ class Character {
     this.charWindow.loadFile(rendererFile('character.html'));
 
     this.charWindow.webContents.on('did-finish-load', () => {
+      this._lastPose = null; // a (re)loaded page needs the current pose
       this.charWindow.webContents.send('character-config', {
         color: this.color,
         colorDark: this.colorDark,
@@ -412,13 +413,30 @@ class Character {
 
     const themeName = this.theme || getCurrentTheme();
     const theme = BUBBLE_THEMES[themeName] || BUBBLE_THEMES['Midnight'];
-    this.bubbleWindow.webContents.send('bubble-show', { text, isCompletion, theme });
+    const payload = { text, isCompletion, theme };
+    const win = this.bubbleWindow;
+    // A just-created bubble is still loading; a message sent now would be lost
+    if (win.webContents.isLoading()) {
+      win.webContents.once('did-finish-load', () => { if (!win.isDestroyed()) win.webContents.send('bubble-show', payload); });
+    } else {
+      win.webContents.send('bubble-show', payload);
+    }
+    clearTimeout(this.bubbleReleaseTimer);
   }
 
   hideBubble() {
     if (this.bubbleWindow && !this.bubbleWindow.isDestroyed()) {
       this.bubbleWindow.webContents.send('bubble-hide');
       this.bubbleWindow.hide();
+      // Free the bubble's renderer process once the bot has been quiet for a while
+      // (it's recreated on the next reply); kept briefly so "thinking…" phrases are cheap
+      clearTimeout(this.bubbleReleaseTimer);
+      this.bubbleReleaseTimer = setTimeout(() => {
+        if (this.bubbleWindow && !this.bubbleWindow.isDestroyed() && !this.bubbleWindow.isVisible()) {
+          this.bubbleWindow.destroy();
+          this.bubbleWindow = null;
+        }
+      }, 30000);
     }
     if (this.bubbleTimeout) {
       clearTimeout(this.bubbleTimeout);
@@ -469,6 +487,7 @@ class Character {
     this.flyTargetPos = { x: targetX, y: targetY };
     this.flyStartTime = Date.now();
     this.flyDuration = 500;
+    this._flyPos = null;
     this.isFlying = true;
     this.isWalking = false;
     this.isPaused = true;
@@ -485,6 +504,7 @@ class Character {
     this.flyTargetPos = this.savedTaskbarPos;
     this.flyStartTime = Date.now();
     this.flyDuration = 400;
+    this._flyPos = null;
     this.isFlying = true;
     this.savedTaskbarPos = null;
 
@@ -510,14 +530,14 @@ class Character {
       const x = this.flyStartPos.x + (this.flyTargetPos.x - this.flyStartPos.x) * ease;
       const y = this.flyStartPos.y + (this.flyTargetPos.y - this.flyStartPos.y) * ease;
 
-      if (this.charWindow && !this.charWindow.isDestroyed()) {
-        this.charWindow.setBounds({
-          x: Math.round(x),
-          y: Math.round(y),
-          width: 64,
-          height: 80
-        });
+      // Hovering at the target (t = 1) doesn't need the window moved every tick
+      const pos = { x: Math.round(x), y: Math.round(y) };
+      if (this.charWindow && !this.charWindow.isDestroyed() &&
+          (!this._flyPos || this._flyPos.x !== pos.x || this._flyPos.y !== pos.y)) {
+        this._flyPos = pos;
+        this.charWindow.setBounds({ ...pos, width: 64, height: 80 });
       }
+      this._lastPos = null; // re-apply the walk position once the flight is over
 
       return; // Skip normal walk logic during flight
     }
@@ -544,27 +564,28 @@ class Character {
       }
     }
 
-    // Update window position
+    // Update window position. Bots stand still most of the time, so only touch the
+    // window (an OS call + IPC per bot, 30×/s) when something actually changed.
     if (this.charWindow && !this.charWindow.isDestroyed()) {
-      const x = walkZone.x + walkZone.width * this.positionProgress - 32;
-      const y = walkZone.y - 80 + this.yOffset;
+      const x = Math.round(walkZone.x + walkZone.width * this.positionProgress - 32);
+      const y = Math.round(walkZone.y - 80 + this.yOffset);
+      const moved = !this._lastPos || this._lastPos.x !== x || this._lastPos.y !== y;
 
-      this.charWindow.setBounds({
-        x: Math.round(x),
-        y: Math.round(y),
-        width: 64,
-        height: 80
-      });
+      if (moved) {
+        this._lastPos = { x, y };
+        this.charWindow.setBounds({ x, y, width: 64, height: 80 });
+        if (this.bubbleWindow && !this.bubbleWindow.isDestroyed() && this.bubbleWindow.isVisible()) {
+          this.bubbleWindow.setBounds({ x: x + 32 - 80, y: y - 55, width: 160, height: 50 });
+        }
+      }
 
-      this.charWindow.webContents.send('position-update', {
-        walking: this.isWalking,
-        direction: this.direction > 0 ? 'right' : 'left'
-      });
-
-      if (this.bubbleWindow && !this.bubbleWindow.isDestroyed() && this.bubbleWindow.isVisible()) {
-        const bubbleX = Math.round(x) + 32 - 80;
-        const bubbleY = Math.round(y) - 55;
-        this.bubbleWindow.setBounds({ x: bubbleX, y: bubbleY, width: 160, height: 50 });
+      const pose = `${this.isWalking}:${this.direction}`;
+      if (pose !== this._lastPose) {
+        this._lastPose = pose;
+        this.charWindow.webContents.send('position-update', {
+          walking: this.isWalking,
+          direction: this.direction > 0 ? 'right' : 'left'
+        });
       }
     }
   }
@@ -609,6 +630,7 @@ class Character {
     if (this.chatWindow && !this.chatWindow.isDestroyed()) {
       this.chatWindow.destroy();
     }
+    clearTimeout(this.bubbleReleaseTimer);
     if (this.bubbleWindow && !this.bubbleWindow.isDestroyed()) {
       this.bubbleWindow.destroy();
     }

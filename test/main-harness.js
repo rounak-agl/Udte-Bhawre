@@ -12,6 +12,7 @@ function createHarness() {
 
   class FakeWebContents extends EventEmitter {
     send(channel, ...args) { sent.push({ wc: this, channel, args }); }
+    isLoading() { return !!this._loading; }
   }
   class FakeBrowserWindow extends EventEmitter {
     constructor() {
@@ -21,7 +22,13 @@ function createHarness() {
       this._bounds = { x: 100, y: 900, width: 64, height: 80 };
       windows.push(this);
     }
-    loadFile() { setImmediate(() => { if (!this._destroyed) this.webContents.emit('did-finish-load'); }); }
+    loadFile() {
+      this.webContents._loading = true;
+      setImmediate(() => {
+        this.webContents._loading = false;
+        if (!this._destroyed) this.webContents.emit('did-finish-load');
+      });
+    }
     isDestroyed() { return this._destroyed; }
     destroy() { if (this._destroyed) return; this._destroyed = true; this.emit('closed'); }
     close() { this.destroy(); }

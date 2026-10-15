@@ -11,6 +11,16 @@ let overlayWindow = null;
 let stepPanelWindow = null;
 let stepGuideOwner = null; // the Character whose session produced the active step guide
 
+/** Send once the page has loaded: a message sent to a still-loading window is lost. */
+function sendWhenLoaded(win, channel, ...args) {
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', () => {
+    if (!win.isDestroyed()) win.webContents.send(channel, ...args);
+  });
+  else win.webContents.send(channel, ...args);
+}
+
+// Created on first use and destroyed when hidden: a full-screen transparent window is a
+// whole renderer process, and step guides are rare.
 function createOverlayWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { x, y, width: sw, height: sh } = primaryDisplay.bounds;
@@ -54,12 +64,12 @@ function showOverlay() {
 }
 
 function hideOverlay() {
-  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
-  if (stepPanelWindow && !stepPanelWindow.isDestroyed()) stepPanelWindow.hide();
+  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy();
+  if (stepPanelWindow && !stepPanelWindow.isDestroyed()) stepPanelWindow.destroy();
 }
 
 function destroyOverlay() {
-  if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy();
+  hideOverlay();
 }
 
 /** Show a step guide for `char`'s answer (fly-to-element moves this bot). */
@@ -68,7 +78,7 @@ function showStepGuide(char, steps) {
   stepGuideOwner = char;
   showOverlay();
   if (overlayWindow && !overlayWindow.isDestroyed()) {
-    overlayWindow.webContents.send('show-step-guide', steps);
+    sendWhenLoaded(overlayWindow, 'show-step-guide', steps);
   }
 }
 
@@ -122,11 +132,11 @@ function registerOverlayIpc() {
 
     stepPanelWindow.setBounds({ x: absX, y: absY, width: 280, height: 160 });
     stepPanelWindow.show();
-    stepPanelWindow.webContents.send('update-step-panel-data', data);
+    sendWhenLoaded(stepPanelWindow, 'update-step-panel-data', data);
   });
 
   ipcMain.on('hide-step-panel', () => {
-    if (stepPanelWindow && !stepPanelWindow.isDestroyed()) stepPanelWindow.hide();
+    if (stepPanelWindow && !stepPanelWindow.isDestroyed()) stepPanelWindow.destroy();
   });
 
   ipcMain.on('step-panel-action', (event, action) => {
@@ -136,4 +146,4 @@ function registerOverlayIpc() {
   });
 }
 
-module.exports = { createOverlayWindow, hideOverlay, destroyOverlay, showStepGuide, registerOverlayIpc };
+module.exports = { hideOverlay, destroyOverlay, showStepGuide, registerOverlayIpc };

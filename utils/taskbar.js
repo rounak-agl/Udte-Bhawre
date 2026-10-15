@@ -4,7 +4,7 @@ const { screen } = require('electron');
  * Detect taskbar/dock position and geometry using Electron's screen API.
  * Works cross-platform: Windows (taskbar), Linux (panels), macOS (dock).
  */
-function getTaskbarGeometry() {
+function computeTaskbarGeometry() {
   const primaryDisplay = screen.getPrimaryDisplay();
   // bounds/workArea are absolute desktop coordinates; on multi-monitor setups the
   // primary display need not start at (0,0), so every result below includes the offset.
@@ -70,6 +70,22 @@ function getTaskbarGeometry() {
     workArea,
     walkZone
   };
+}
+
+// The walk loop asks 30×/s; the answer only changes when displays change.
+let cached = null;
+let watching = false;
+
+function getTaskbarGeometry() {
+  if (!watching && typeof screen.on === 'function') {
+    watching = true;
+    const reset = () => { cached = null; };
+    screen.on('display-metrics-changed', reset);
+    screen.on('display-added', reset);
+    screen.on('display-removed', reset);
+  }
+  if (!cached) cached = computeTaskbarGeometry();
+  return cached;
 }
 
 module.exports = { getTaskbarGeometry };

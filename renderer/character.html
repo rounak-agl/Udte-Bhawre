@@ -128,13 +128,14 @@
       animation: bounce 0.35s ease-in-out infinite;
     }
 
-    /* Idle blink */
+    /* Blink: character.js adds .blink for one 0.25 s blink every few seconds. (A 4 s
+       infinite animation made each bot's window repaint every frame, all the time.) */
     @keyframes blink {
-      0%, 94%, 100% { transform: scaleY(1); }
-      97% { transform: scaleY(0.1); }
+      0%, 100% { transform: scaleY(1); }
+      50% { transform: scaleY(0.1); }
     }
-    .char-eye {
-      animation: blink 4s ease-in-out infinite;
+    .blink .char-eye {
+      animation: blink 0.25s ease-in-out;
     }
 
     /* Flip for direction */

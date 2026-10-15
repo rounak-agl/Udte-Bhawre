@@ -32,6 +32,16 @@ window.assistant.onPositionUpdate((data) => {
   charEl.classList.add(data.direction === 'left' ? 'facing-left' : 'facing-right');
 });
 
+// Blink every ~4 s (randomised so bots don't blink in sync)
+function scheduleBlink() {
+  setTimeout(() => {
+    charEl.classList.add('blink');
+    setTimeout(() => charEl.classList.remove('blink'), 250);
+    scheduleBlink();
+  }, 3000 + Math.random() * 2500);
+}
+scheduleBlink();
+
 // Click handler
 charEl.addEventListener('click', () => {
   window.assistant.characterClicked();
