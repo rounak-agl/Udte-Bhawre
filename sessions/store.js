@@ -19,7 +19,9 @@ function save(data) {
   try {
     const existing = load();
     const merged = { ...existing, ...data };
-    fs.writeFileSync(STORE_FILE, JSON.stringify(merged, null, 2), 'utf8');
+    // Owner-only: the file holds (encrypted, or if no keychain, plain) secrets
+    fs.writeFileSync(STORE_FILE, JSON.stringify(merged, null, 2), { encoding: 'utf8', mode: 0o600 });
+    try { fs.chmodSync(STORE_FILE, 0o600); } catch (_) { /* e.g. Windows: ACLs instead */ }
   } catch (e) {
     console.error('Failed to save settings:', e);
   }

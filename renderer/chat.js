@@ -24,6 +24,7 @@ let streamingMessageEl = null;
 let lastAssistantText = '';
 let hasMessages = false;
 let settingsOpen = false;
+let toolsEnabled = true; // this agent's desktop tools setting (Gemini Vision only)
 
 // ─── Provider config ───
 const themeClasses = {
@@ -86,6 +87,19 @@ function updateProviderUI() {
   document.querySelectorAll('.settings-item[data-provider]').forEach(el => {
     el.classList.toggle('active', el.dataset.provider === currentProvider);
   });
+  updateToolsUI();
+}
+
+// ─── Tools toggle (per agent) ───
+// Desktop tools (files, clipboard, URLs, shell…) only exist for Gemini Vision; the CLI
+// providers bring their own, so the toggle is only shown for Vision.
+function updateToolsUI() {
+  const section = document.getElementById('settings-tools-section');
+  if (!section) return;
+  section.style.display = currentProvider === 'vision' ? '' : 'none';
+  const toggle = section.querySelector('[data-tools-toggle]');
+  toggle.classList.toggle('active', toolsEnabled);
+  toggle.querySelector('.item-label').textContent = `Desktop tools: ${toolsEnabled ? 'On' : 'Off'}`;
 }
 
 // ─── Settings dropdown ───
@@ -103,6 +117,13 @@ function createSettingsDropdown() {
         <span class="item-dot"></span>${providerNames[p]}
       </button>
     `).join('')}
+    <div id="settings-tools-section">
+      <div class="settings-divider"></div>
+      <div class="settings-section-title">Tools</div>
+      <button class="settings-item" data-tools-toggle>
+        <span class="item-dot"></span><span class="item-label"></span>
+      </button>
+    </div>
     <div class="settings-divider"></div>
     <div class="settings-section-title">Theme</div>
     ${themes.map(t => `
@@ -113,13 +134,20 @@ function createSettingsDropdown() {
   `;
 
   container.appendChild(dropdown);
+  updateToolsUI();
 
   dropdown.addEventListener('click', (e) => {
     const item = e.target.closest('.settings-item');
     if (!item) return;
 
-    if (item.dataset.provider) {
-      window.assistant.sendMessage(`/provider ${item.dataset.provider}`);
+    if (item.hasAttribute('data-tools-toggle')) {
+      // Main replies with 'tools-change' once the agent's session has been updated
+      window.assistant.setChatTools(!toolsEnabled);
+    }
+
+    if (item.dataset.provider && item.dataset.provider !== currentProvider) {
+      // Switches this agent's provider; main replies with 'provider-change'
+      window.assistant.setChatProvider(item.dataset.provider);
     }
     if (item.dataset.theme) {
       if (window.assistant.setTheme) {
@@ -181,20 +209,13 @@ function parseError(text) {
   return { title: 'Error', reason: text };
 }
 
-// ─── Get initial state ───
-(async () => {
-  try {
-    const state = await window.assistant.getInitialState();
-    if (state) {
-      currentProvider = state.provider || 'claude';
-      currentTheme = state.theme || 'Peach';
-      applyTheme(currentTheme);
-      updateProviderUI();
-    }
-  } catch (e) {
-    // defaults are fine
-  }
-})();
+// ─── Initial state for this agent's chat (sent by main when the window loads) ───
+window.assistant.onChatInit((state) => {
+  if (!state) return;
+  currentProvider = state.provider || currentProvider;
+  toolsEnabled = state.toolsEnabled !== false;
+  applyTheme(themeClasses[state.theme] ? state.theme : currentTheme);
+});
 
 // ─── Message rendering ───
 function addMessage(role, text) {
@@ -395,12 +416,6 @@ function clearMessages() {
 function handleSlashCommand(cmd) {
   const parts = cmd.trim().toLowerCase().split(/\s+/);
   switch (parts[0]) {
-    case '/clear':
-      clearMessages();
-      addMessage('system', '💬 Chat cleared.');
-      window.assistant.slashCommand('clear');
-      return true;
-
     case '/copy':
       if (lastAssistantText) {
         navigator.clipboard.writeText(lastAssistantText).then(() => {
@@ -414,7 +429,7 @@ function handleSlashCommand(cmd) {
       return true;
 
     case '/help':
-      addMessage('system', '📖 Commands:\n  /clear — Clear chat history\n  /copy — Copy last AI response\n  /help — Show this help');
+      addMessage('system', '📖 Commands:\n  /copy — Copy last AI response\n  /help — Show this help\n\nTo start over, delete the conversation in Control Centre → Chat.');
       return true;
 
     default:
@@ -566,17 +581,30 @@ window.assistant.onThemeChange((theme) => {
   if (theme && themeClasses[theme]) applyTheme(theme);
 });
 
+// Provider / key / tools changes keep the conversation (main carries it over),
+// so the transcript stays on screen.
 window.assistant.onProviderChange((provider) => {
-  if (!provider) return;
+  if (!provider || provider === currentProvider) return;
   currentProvider = provider;
   updateProviderUI();
-  clearMessages();
-  addMessage('system', `🔄 Switched to ${providerNames[provider] || provider}. Session restarted.`);
+  addMessage('system', `🔄 Switched to ${providerNames[provider] || provider} — conversation continues.`);
 });
 
 window.assistant.onApiKeyChange(() => {
+  addMessage('system', '🔑 API key updated.');
+});
+
+window.assistant.onToolsChange((enabled) => {
+  toolsEnabled = !!enabled;
+  updateToolsUI();
+  addMessage('system', toolsEnabled ? '🧰 Desktop tools enabled for this agent.' : '🧰 Desktop tools disabled for this agent.');
+});
+
+// The saved conversation was deleted from the Control Centre: the agent starts fresh
+window.assistant.onChatCleared(() => {
   clearMessages();
-  addMessage('system', '🔑 API Key updated. Session restarted.');
+  lastAssistantText = '';
+  addMessage('system', '🗑️ This conversation was deleted. Starting a new one.');
 });
 
 // Focus input on load

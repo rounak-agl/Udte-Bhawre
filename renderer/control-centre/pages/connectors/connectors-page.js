@@ -128,6 +128,7 @@ function ConnectorsPage() {
           const inputWrap = window.PFInput({
             label: ek.label,
             type: 'password',
+            revealable: true,
             placeholder: ek.placeholder,
             value: savedVal,
             onInput: (val) => {

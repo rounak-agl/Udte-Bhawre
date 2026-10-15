@@ -1,5 +1,7 @@
 const spawn = require('cross-spawn'); // no shell: user text must never reach sh/cmd.exe
 const { findBinary, getProcessEnv } = require('../utils/shell-env');
+const { getProviderEnv } = require('./agent-session');
+const { buildTranscript } = require('./conversation-context');
 const os = require('os');
 const EventEmitter = require('events');
 
@@ -17,6 +19,7 @@ class ClaudeSession extends EventEmitter {
     this.lineBuffer = '';
     this.currentResponseText = '';
     this.pendingMessages = [];
+    this.systemPrompt = ''; // set by the owning Character before start()
   }
 
   start() {
@@ -32,16 +35,27 @@ class ClaudeSession extends EventEmitter {
 
   _launchProcess(binaryPath) {
     try {
-      this.process = spawn(binaryPath, [
+      const args = [
         '-p',
         '--output-format', 'stream-json',
         '--input-format', 'stream-json',
         // No --dangerously-skip-permissions: in non-interactive mode, tools that need
         // permission (Bash, Edit, Write) are denied instead of running unattended.
         '--verbose'
-      ], {
+      ];
+      // Agent persona/context file and any earlier conversation (restored from the
+      // database or carried over from a previous session), added on top of Claude's
+      // default system prompt. Within one process Claude keeps its own memory.
+      const earlier = buildTranscript(this.history);
+      const extraPrompt = [
+        this.systemPrompt,
+        earlier && `Earlier conversation with this user (continue from here):\n${earlier}`
+      ].filter(Boolean).join('\n\n');
+      if (extraPrompt) args.push('--append-system-prompt', extraPrompt);
+
+      this.process = spawn(binaryPath, args, {
         cwd: os.homedir(),
-        env: getProcessEnv(),
+        env: { ...getProcessEnv(), ...getProviderEnv('claude') }, // + this provider's API key, if set
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true
       });

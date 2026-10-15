@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld('assistant', {
   // Chat
   minimizeChat: () => ipcRenderer.send('chat-minimize'),
   setTheme: (theme) => ipcRenderer.send('set-theme', theme),
+  setChatProvider: (provider) => ipcRenderer.send('chat-set-provider', provider),
+  setChatTools: (enabled) => ipcRenderer.send('chat-set-tools', enabled),
+  onChatInit: (callback) => onChannel('chat-init', callback),
+  onToolsChange: (callback) => onChannel('tools-change', callback),
+  onChatCleared: (callback) => onChannel('chat-cleared', callback),
   sendMessage: (msg) => ipcRenderer.send('chat-send', msg),
   onChatText: (callback) => onChannel('chat-text', callback),
   onChatError: (callback) => onChannel('chat-error', callback),
@@ -32,7 +37,6 @@ contextBridge.exposeInMainWorld('assistant', {
   onThemeChange: (callback) => onChannel('theme-change', callback),
   onProviderChange: (callback) => onChannel('provider-change', callback),
   onApiKeyChange: (callback) => onChannel('api-key-changed', callback),
-  slashCommand: (cmd) => ipcRenderer.send('slash-command', cmd),
   copyLastResponse: () => ipcRenderer.send('copy-last-response'),
   getInitialState: () => ipcRenderer.invoke('get-initial-state'),
 

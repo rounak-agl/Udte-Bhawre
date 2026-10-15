@@ -1,5 +1,6 @@
 const spawn = require('cross-spawn'); // no shell: user text must never reach sh/cmd.exe
 const { findBinary, getProcessEnv } = require('../utils/shell-env');
+const { getProviderEnv } = require('./agent-session');
 const os = require('os');
 const EventEmitter = require('events');
 
@@ -13,6 +14,7 @@ class CopilotSession extends EventEmitter {
     this.isRunning = false;
     this.isBusy = false;
     this.history = [];
+    this.systemPrompt = ''; // agent persona, set by the owning Character before start()
     this.outputBuffer = '';
   }
 
@@ -29,46 +31,64 @@ class CopilotSession extends EventEmitter {
   }
 
   _launch(binaryPath, args) {
+    let proc;
     try {
-      this.process = spawn(binaryPath, args, {
+      proc = spawn(binaryPath, args, {
         cwd: os.homedir(),
-        env: getProcessEnv(),
+        env: { ...getProcessEnv(), ...getProviderEnv('copilot') }, // + this provider's API key, if set
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true
-      });
-
-      this.process.stdout.on('data', (data) => {
-        const text = data.toString('utf8');
-        this.outputBuffer += text;
-        this.emit('text', text);
-      });
-
-      this.process.stderr.on('data', (data) => {
-        const errText = data.toString('utf8').trim();
-        if (!errText) return;
-        if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\s]+$/.test(errText)) return;
-        if (errText.includes('429') || errText.includes('rate')) {
-          this.emit('error', '⏳ Rate limited. Please wait a moment and try again.');
-          return;
-        }
-        const firstLine = errText.split('\n')[0].substring(0, 200);
-        if (firstLine.includes('Error') || firstLine.includes('error') || firstLine.includes('not found')) {
-          this.emit('error', firstLine);
-        }
-      });
-
-      this.process.on('exit', () => {
-        if (this.outputBuffer.trim()) {
-          this.history.push({ role: 'assistant', text: this.outputBuffer.trim() });
-        }
-        this.outputBuffer = '';
-        this.isBusy = false;
-        this.emit('turnComplete');
       });
     } catch (err) {
       this.emit('error', `Failed to launch Copilot CLI: ${err.message}`);
       this.isBusy = false;
+      return;
     }
+    this.process = proc;
+    // A killed process exits asynchronously: ignore its late events so they can't
+    // leak into (or prematurely complete) the next turn.
+    const isCurrent = () => this.process === proc;
+
+    proc.stdout.on('data', (data) => {
+      if (!isCurrent()) return;
+      const text = data.toString('utf8');
+      this.outputBuffer += text;
+      this.emit('text', text);
+    });
+
+    proc.stderr.on('data', (data) => {
+      if (!isCurrent()) return;
+      const errText = data.toString('utf8').trim();
+      if (!errText) return;
+      if (/^[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏\s]+$/.test(errText)) return;
+      if (errText.includes('429') || errText.includes('rate')) {
+        this.emit('error', '⏳ Rate limited. Please wait a moment and try again.');
+        return;
+      }
+      const firstLine = errText.split('\n')[0].substring(0, 200);
+      if (firstLine.includes('Error') || firstLine.includes('error') || firstLine.includes('not found')) {
+        this.emit('error', firstLine);
+      }
+    });
+
+    // Without an 'error' listener, a failed spawn would throw in the main process
+    proc.on('error', (err) => {
+      if (!isCurrent()) return;
+      this.isBusy = false;
+      this.emit('error', `Failed to launch Copilot CLI: ${err.message}`);
+    });
+
+    // 'close' (not 'exit'): fires only after stdout is drained, so the reply is complete
+    proc.on('close', () => {
+      if (!isCurrent()) return;
+      if (this.outputBuffer.trim()) {
+        this.history.push({ role: 'assistant', text: this.outputBuffer.trim() });
+      }
+      this.outputBuffer = '';
+      this.isBusy = false;
+      this.process = null;
+      this.emit('turnComplete');
+    });
   }
 
   send(message) {
@@ -86,14 +106,19 @@ class CopilotSession extends EventEmitter {
       this.isBusy = false;
       return;
     }
+    // `copilot suggest` takes a single request, so the agent's persona file (if any)
+    // is not applied here — it would be sent as part of the command request.
     this._launch(binaryPath, ['suggest', message]);
   }
 
   terminate() {
-    if (this.process) {
-      try { this.process.kill(); } catch (e) { /* */ }
+    const proc = this.process;
+    this.process = null; // detach first so the dying process's late events are ignored
+    if (proc) {
+      try { proc.kill(); } catch (e) { /* */ }
     }
     this.isRunning = false;
+    this.isBusy = false;
   }
 }
 

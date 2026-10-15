@@ -46,9 +46,15 @@ function ChatPage() {
         
         const hd = pfCreateElement('div', 'pf-chat-item-header');
         hd.appendChild(pfCreateElement('div', 'pf-chat-item-title', { textContent: chat.title || 'Conversation' }));
-        hd.appendChild(pfCreateElement('div', 'pf-chat-item-time', { 
-          textContent: chat.updatedAt ? PFUtils.formatRelativeTime(chat.updatedAt) : '' 
+        hd.appendChild(pfCreateElement('div', 'pf-chat-item-time', {
+          textContent: chat.updatedAt ? PFUtils.formatRelativeTime(chat.updatedAt) : ''
         }));
+        const delBtn = pfCreateElement('button', 'pf-chat-item-delete', { title: 'Delete conversation', 'aria-label': 'Delete conversation', textContent: '×' });
+        delBtn.onclick = (e) => {
+          e.stopPropagation(); // don't also open the conversation
+          deleteChat(chat);
+        };
+        hd.appendChild(delBtn);
         item.appendChild(hd);
         item.appendChild(pfCreateElement('div', 'pf-chat-item-preview', { 
           textContent: chat.agentId ? `with ${chat.agentId.name || 'Agent'}` : `${chat.messages?.length || 0} messages`
@@ -87,6 +93,12 @@ function ChatPage() {
     } else {
       header.appendChild(pfCreateElement('div', 'pf-chat-agent-name', { textContent: chatInfo?.title || 'Conversation' }));
     }
+    if (chatInfo) {
+      const deleteBtn = window.PFButton({ label: 'Delete', variant: 'ghost', size: 'sm' });
+      deleteBtn.classList.add('pf-chat-delete-btn');
+      deleteBtn.onclick = () => deleteChat(chatInfo);
+      header.appendChild(deleteBtn);
+    }
     mainArea.appendChild(header);
     
     // Messages Area
@@ -119,13 +131,32 @@ function ChatPage() {
       style: 'background: rgba(0,0,0,0.2); border-top: 1px solid var(--pf-color-border); padding: 12px; font-size: 13px; color: var(--pf-color-text-secondary); text-align: center;'
     });
     noticeArea.appendChild(pfCreateElement('div', '', { 
-      textContent: 'Chat history is read-only here. To continue this conversation, open the character window on your desktop.' 
+      textContent: 'Chat history is read-only here. Each agent continues its most recent conversation — click the agent on your desktop to chat.'
     }));
     mainArea.appendChild(noticeArea);
     
     setTimeout(() => { messagesBox.scrollTop = messagesBox.scrollHeight; }, 10);
   }
   
+  async function deleteChat(chat) {
+    const name = chat.title || 'this conversation';
+    const agentNote = chat.agentId?.name ? ` ${chat.agentId.name} will forget it.` : '';
+    if (!confirm(`Delete "${name}"? This can't be undone.${agentNote}`)) return;
+    if (!window.ccBridge) return;
+
+    const ok = await window.ccBridge.deleteChatSession(chat._id);
+    if (!ok) {
+      window.PFToast.show('Error', 'Could not delete the conversation.');
+      return;
+    }
+    window.PFToast.show('Deleted', `"${name}" was deleted.`);
+    if (currentChatId === chat._id) {
+      currentChatId = null;
+      renderEmptyState();
+    }
+    await loadChats();
+  }
+
   function renderMsg(msg) {
     const role = msg.role === 'user' ? 'user' : 'assistant';
     const wrapper = pfCreateElement('div', `pf-message pf-message--${role}`);

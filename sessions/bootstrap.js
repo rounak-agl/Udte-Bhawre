@@ -1,75 +1,83 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const assert = require('assert');
 
+/**
+ * Boot-time setup for the ArmorIQ guard config. Never throws: a bad or foreign config
+ * must not stop the app from starting — the guard just stays disabled (see
+ * armoriq-guard.js initialize()), and the problem is logged.
+ *
+ * ~/.openclaw/openclaw.json may belong to a real OpenClaw install, so it is only
+ * created when missing and never rewritten. The policy always comes from this app's
+ * own armoriq.policy.json (loadArmorIQConfig ignores policyStorePath).
+ */
 function runBootstrap() {
   const projectRoot = path.join(__dirname, '..');
   const configDir = path.join(os.homedir(), '.openclaw');
   const openclawConfigPath = path.join(configDir, 'openclaw.json');
   const policyPath = path.join(projectRoot, 'armoriq.policy.json');
 
-  // Ensure directory exists
-  if (!fs.existsSync(configDir)) {
-    fs.mkdirSync(configDir, { recursive: true });
-  }
-
-  // 1. Write defaults if openclaw.json is missing
-  if (!fs.existsSync(openclawConfigPath)) {
-    const defaultOpenclaw = {
-      plugins: {
-        entries: {
-          armorclaw: {
-            config: {
-              apiKey: '',
-              agentId: 'antigravity-agent-001',
-              policyStorePath: policyPath
+  // 1. Create a default openclaw.json (a place to put the ArmorIQ API key) if missing
+  try {
+    if (!fs.existsSync(openclawConfigPath)) {
+      fs.mkdirSync(configDir, { recursive: true });
+      const defaultOpenclaw = {
+        plugins: {
+          entries: {
+            armorclaw: {
+              config: {
+                apiKey: '',
+                agentId: 'antigravity-agent-001'
+              }
             }
           }
         }
-      }
-    };
-    fs.writeFileSync(openclawConfigPath, JSON.stringify(defaultOpenclaw, null, 2), 'utf8');
-    console.log('[Bootstrap] Wrote default openclaw.json');
+      };
+      fs.writeFileSync(openclawConfigPath, JSON.stringify(defaultOpenclaw, null, 2), 'utf8');
+      console.log('[Bootstrap] Wrote default openclaw.json');
+    }
+  } catch (err) {
+    console.warn(`[Bootstrap] ⚠️  Could not create ${openclawConfigPath}: ${err.message}`);
   }
 
-  // 2. Write defaults if policy file is missing
-  if (!fs.existsSync(policyPath)) {
-    const defaultPolicy = {
-      agentId: "antigravity-agent-001",
-      allow: [],
-      deny: ["upload_external"]
-    };
-    fs.writeFileSync(policyPath, JSON.stringify(defaultPolicy, null, 2), 'utf8');
-    console.log('[Bootstrap] Wrote default armoriq.policy.json');
+  // 2. Write the default policy file if missing (may fail in a read-only packaged app)
+  try {
+    if (!fs.existsSync(policyPath)) {
+      const defaultPolicy = {
+        agentId: 'antigravity-agent-001',
+        allow: [],
+        deny: ['upload_external']
+      };
+      fs.writeFileSync(policyPath, JSON.stringify(defaultPolicy, null, 2), 'utf8');
+      console.log('[Bootstrap] Wrote default armoriq.policy.json');
+    }
+  } catch (err) {
+    console.warn(`[Bootstrap] ⚠️  Could not write default policy file: ${err.message}`);
   }
 
-  // 3. Immediately read back and validate JSON and keys (boot-time validation)
+  // 3. Validate (read-only) and report — warnings only
+  const problems = [];
   try {
     const loadedConfig = JSON.parse(fs.readFileSync(openclawConfigPath, 'utf8'));
-    const armorclawConfig = loadedConfig.plugins?.entries?.armorclaw?.config;
-    assert(armorclawConfig, 'armorclaw plugin configuration missing from openclaw.json');
-    
-    // Force synchronize the policyStorePath to ensure it points to the local workspace
-    if (armorclawConfig.policyStorePath !== policyPath) {
-      armorclawConfig.policyStorePath = policyPath;
-      fs.writeFileSync(openclawConfigPath, JSON.stringify(loadedConfig, null, 2), 'utf8');
-      console.log('[Bootstrap] Synced policyStorePath in openclaw.json to local workspace');
+    if (!loadedConfig.plugins?.entries?.armorclaw?.config) {
+      problems.push('openclaw.json has no armorclaw plugin section (ArmorIQ guard will stay disabled unless ARMORIQ_API_KEY is set)');
     }
-
-    assert(armorclawConfig.policyStorePath, 'policyStorePath missing from openclaw.json config');
-    assert(armorclawConfig.agentId, 'agentId missing from openclaw.json config');
-
-    const loadedPolicy = JSON.parse(fs.readFileSync(armorclawConfig.policyStorePath, 'utf8'));
-    assert(loadedPolicy.agentId, 'agentId missing from policy file');
-    assert(Array.isArray(loadedPolicy.allow), 'allow list must be an array');
-    assert(Array.isArray(loadedPolicy.deny), 'deny list must be an array');
-
-    console.log('[Bootstrap] ✅ Configuration and policy file verified.');
   } catch (err) {
-    console.error(`[Bootstrap] ❌ CRITICAL: Configuration verification failed! ${err.message}`);
-    // Hard halt - do not silently fallback
-    throw err;
+    problems.push(`openclaw.json unreadable: ${err.message}`);
+  }
+  try {
+    const loadedPolicy = JSON.parse(fs.readFileSync(policyPath, 'utf8'));
+    if (!loadedPolicy.agentId) problems.push('agentId missing from policy file');
+    if (!Array.isArray(loadedPolicy.allow)) problems.push('policy "allow" must be an array');
+    if (!Array.isArray(loadedPolicy.deny)) problems.push('policy "deny" must be an array');
+  } catch (err) {
+    problems.push(`policy file unreadable: ${err.message}`);
+  }
+
+  if (problems.length === 0) {
+    console.log('[Bootstrap] ✅ Configuration and policy file verified.');
+  } else {
+    problems.forEach(p => console.warn(`[Bootstrap] ⚠️  ${p}`));
   }
 }
 

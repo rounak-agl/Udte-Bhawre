@@ -567,33 +567,37 @@ class ArmorIQGuard extends EventEmitter {
 }
 
 /**
- * Load ArmorIQ config from ~/.openclaw/openclaw.json
- * Extracts the armorclaw plugin config section.
+ * Load ArmorIQ config from ~/.openclaw/openclaw.json (the armorclaw plugin section),
+ * with ARMORIQ_API_KEY taking precedence. Only keys that are actually set are returned,
+ * so DEFAULT_CONFIG's endpoints aren't overwritten with `undefined` when spread.
+ * The policy is always this app's own armoriq.policy.json — never a policyStorePath
+ * from a real OpenClaw install, which belongs to that tool.
  */
 function loadArmorIQConfig() {
+  let pluginConfig = {};
   try {
     const configPath = path.join(os.homedir(), '.openclaw', 'openclaw.json');
-    if (!fs.existsSync(configPath)) {
+    if (fs.existsSync(configPath)) {
+      const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      pluginConfig = parsed.plugins?.entries?.armorclaw?.config || {};
+    } else {
       console.warn('[ArmorIQ] No openclaw.json found — using defaults');
-      return {};
     }
-    const raw = fs.readFileSync(configPath, 'utf8');
-    const parsed = JSON.parse(raw);
-    const pluginConfig = parsed.plugins?.entries?.armorclaw?.config || {};
-    return {
-      apiKey: process.env.ARMORIQ_API_KEY || pluginConfig.apiKey || '',
-      userId: pluginConfig.userId || 'default-user',
-      agentId: pluginConfig.agentId || 'openclaw-agent-001',
-      contextId: pluginConfig.contextId || 'default',
-      iapEndpoint: pluginConfig.iapEndpoint,
-      proxyEndpoint: pluginConfig.proxyEndpoint,
-      backendEndpoint: pluginConfig.backendEndpoint,
-      policyPath: pluginConfig.policyStorePath || path.join(__dirname, '..', 'armoriq.policy.json'),
-    };
   } catch (err) {
     console.error('[ArmorIQ] Failed to load openclaw config:', err.message);
-    return {};
   }
+
+  const config = {
+    apiKey: process.env.ARMORIQ_API_KEY || pluginConfig.apiKey || '',
+    userId: pluginConfig.userId || 'default-user',
+    agentId: pluginConfig.agentId || 'openclaw-agent-001',
+    contextId: pluginConfig.contextId || 'default',
+    iapEndpoint: pluginConfig.iapEndpoint,
+    proxyEndpoint: pluginConfig.proxyEndpoint,
+    backendEndpoint: pluginConfig.backendEndpoint,
+    policyPath: path.join(__dirname, '..', 'armoriq.policy.json'),
+  };
+  return Object.fromEntries(Object.entries(config).filter(([, v]) => v !== undefined && v !== null && v !== ''));
 }
 
 module.exports = { ArmorIQGuard, loadArmorIQConfig };

@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld('ccBridge', {
   getInitialState: () => ipcRenderer.invoke('get-initial-state'),
   getApiKey: () => ipcRenderer.invoke('get-api-key'),
   setApiKey: (key) => ipcRenderer.send('set-api-key', key),
+  getProviderApiKeys: () => ipcRenderer.invoke('get-provider-api-keys'),
+  getSecretStorageStatus: () => ipcRenderer.invoke('get-secret-storage-status'),
+  setProviderApiKey: (provider, key) => ipcRenderer.send('set-provider-api-key', provider, key),
   getElevenLabsApiKey: () => ipcRenderer.invoke('get-eleven-labs-api-key'),
   setElevenLabsApiKey: (key) => ipcRenderer.send('set-eleven-labs-api-key', key),
   getMongodbUri: () => ipcRenderer.invoke('get-mongodb-uri'),
@@ -24,14 +27,12 @@ contextBridge.exposeInMainWorld('ccBridge', {
   launchAgent: (agent) => ipcRenderer.send('launch-agent', agent),
   getHistory: () => ipcRenderer.invoke('get-history'),
   getChatMessages: (sessionId) => ipcRenderer.invoke('get-chat-messages', sessionId),
+  deleteChatSession: (sessionId) => ipcRenderer.invoke('delete-chat-session', sessionId),
   getTasks: () => ipcRenderer.invoke('get-tasks'),
   saveTask: (task) => ipcRenderer.invoke('save-task', task),
   deleteTask: (id) => ipcRenderer.invoke('delete-task', id),
   chooseContextFile: () => ipcRenderer.invoke('choose-context-file'),
 
-  // ── CC Specific: Chat & Tools ──
+  // ── CC Specific: Tools ──
   getMcpTools: () => ipcRenderer.invoke('cc:get-mcp-tools'),
-  sendMessage: (sessionId, text) => ipcRenderer.send('cc:send-message', sessionId, text),
-  onChatText: (cb) => ipcRenderer.on('cc:chat-text', (_, sessionId, text) => cb(sessionId, text)),
-  onChatTurnComplete: (cb) => ipcRenderer.on('cc:chat-turn-complete', (_, sessionId) => cb(sessionId)),
 });

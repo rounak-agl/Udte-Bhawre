@@ -68,80 +68,92 @@ function SettingsPage() {
   providerGroup.appendChild(providerRow);
   generalSection.appendChild(providerGroup);
 
-  // 2. Global API Key (Gemini/Claude)
-  const apiGroup = window.pfCreateElement('div', 'pf-form-group');
-  const inputWrap = window.PFInput({ label: 'Global AI API Key', type: 'password', id: 'global-api-key' });
-  const apiKeyInputDom = inputWrap.querySelector('input');
-  
-  if (window.ccBridge) {
-    window.ccBridge.getApiKey().then(key => { if (key) apiKeyInputDom.value = key; });
-  }
+  /**
+   * A secret setting: hidden input with a show/hide button, a Save button and a hint.
+   * `load()` resolves to the stored value; `save(value)` persists it.
+   */
+  const secretField = ({ id, label, placeholder, desc, load, save, savedTitle, savedMessage }) => {
+    const group = window.pfCreateElement('div', 'pf-form-group');
+    const wrap = window.PFInput({ label, placeholder, type: 'password', id, revealable: true });
+    const input = wrap.querySelector('input');
+    if (window.ccBridge) load().then(v => { if (v) input.value = v; }).catch(() => {});
 
-  const saveKeyBtn = window.PFButton({ label: 'Save', variant: 'secondary' });
-  saveKeyBtn.onclick = () => {
-    if (window.ccBridge) window.ccBridge.setApiKey(apiKeyInputDom.value);
-    window.PFToast.show('Saved', 'API Key updated.');
+    const saveBtn = window.PFButton({ label: 'Save', variant: 'secondary' });
+    saveBtn.onclick = () => {
+      if (window.ccBridge) save(input.value.trim());
+      window.PFToast.show(savedTitle || 'Saved', savedMessage);
+    };
+
+    const row = window.pfCreateElement('div', 'pf-form-row');
+    wrap.style.flex = '1';
+    row.appendChild(wrap);
+    row.appendChild(saveBtn);
+    group.appendChild(row);
+    if (desc) group.appendChild(window.pfCreateElement('div', 'pf-form-desc', { textContent: desc }));
+    return group;
   };
-  
-  const formRow = window.pfCreateElement('div', 'pf-form-row');
-  formRow.appendChild(inputWrap);
-  formRow.appendChild(saveKeyBtn);
-  inputWrap.style.flex = '1';
-  
-  apiGroup.appendChild(formRow);
-  apiGroup.appendChild(window.pfCreateElement('div', 'pf-form-desc', { textContent: 'Used for Claude and Gemini Vision.' }));
-  generalSection.appendChild(apiGroup);
+
+  // 2. Provider API keys — one per provider, each passed only to that provider
+  generalSection.appendChild(window.pfCreateElement('h3', 'pf-settings-subsection-title', { textContent: 'API Keys' }));
+
+  // Encryption-at-rest status for keys, tokens and the DB URI
+  const secretStatusEl = window.pfCreateElement('div', 'pf-form-desc pf-secret-status', { textContent: 'Checking key storage…' });
+  generalSection.appendChild(secretStatusEl);
+  if (window.ccBridge) {
+    window.ccBridge.getSecretStorageStatus().then(s => {
+      if (!s) return;
+      const store = { gnome_libsecret: 'GNOME Keyring', kwallet: 'KWallet', kwallet5: 'KWallet', kwallet6: 'KWallet' }[s.backend]
+        || { darwin: 'macOS Keychain', win32: 'Windows Data Protection' }[s.platform] || 'your system keychain';
+      secretStatusEl.classList.toggle('is-warning', !s.encrypted);
+      secretStatusEl.textContent = s.encrypted
+        ? `🔒 Keys, tokens and the database URI are encrypted on disk with ${store}.`
+        : '⚠️ No system keychain is available, so keys are stored unencrypted (owner-only file permissions). Install/unlock GNOME Keyring or KWallet and restart to encrypt them.';
+    }).catch(() => { secretStatusEl.textContent = ''; });
+  }
+  const providerKeys = window.ccBridge ? window.ccBridge.getProviderApiKeys() : Promise.resolve({});
+  const providerKeyFields = [
+    { provider: 'gemini', label: 'Gemini API Key', placeholder: 'AIza…',
+      desc: 'Used by Gemini Vision and the Gemini CLI. Get one free at aistudio.google.com/apikey.' },
+    { provider: 'claude', label: 'Claude API Key (Anthropic)', placeholder: 'sk-ant-…',
+      desc: 'Optional. Sent to the Claude CLI as ANTHROPIC_API_KEY — leave empty to use your `claude` login.' },
+    { provider: 'codex', label: 'Codex API Key (OpenAI)', placeholder: 'sk-…',
+      desc: 'Optional. Sent to the Codex CLI as OPENAI_API_KEY — leave empty to use your `codex` login.' },
+    { provider: 'copilot', label: 'Copilot Token (GitHub)', placeholder: 'github_pat_… / ghp_…',
+      desc: 'Optional. Sent to the Copilot CLI as GH_TOKEN — leave empty to use your GitHub CLI login.' }
+  ];
+  providerKeyFields.forEach(f => {
+    generalSection.appendChild(secretField({
+      id: `api-key-${f.provider}`,
+      label: f.label,
+      placeholder: f.placeholder,
+      desc: f.desc,
+      load: () => providerKeys.then(keys => keys[f.provider] || ''),
+      save: (value) => window.ccBridge.setProviderApiKey(f.provider, value),
+      savedMessage: `${f.label} updated. Open chats using it were restarted (conversation kept).`
+    }));
+  });
 
   // 3. ElevenLabs API Key
-  const elGroup = window.pfCreateElement('div', 'pf-form-group');
-  const elInputWrap = window.PFInput({ label: 'ElevenLabs API Key', type: 'password', id: 'el-api-key' });
-  const elKeyInputDom = elInputWrap.querySelector('input');
+  generalSection.appendChild(window.pfCreateElement('h3', 'pf-settings-subsection-title', { textContent: 'Voice & Data' }));
+  generalSection.appendChild(secretField({
+    id: 'el-api-key',
+    label: 'ElevenLabs API Key',
+    desc: 'Used for speech-to-text (hold Space or the mic button in a chat).',
+    load: () => window.ccBridge.getElevenLabsApiKey(),
+    save: (value) => window.ccBridge.setElevenLabsApiKey(value),
+    savedMessage: 'ElevenLabs key updated.'
+  }));
 
-  if (window.ccBridge) {
-    window.ccBridge.getElevenLabsApiKey().then(key => { if (key) elKeyInputDom.value = key; });
-  }
-
-  const saveElBtn = window.PFButton({ label: 'Save', variant: 'secondary' });
-  saveElBtn.onclick = () => {
-    if (window.ccBridge) window.ccBridge.setElevenLabsApiKey(elKeyInputDom.value);
-    window.PFToast.show('Saved', 'ElevenLabs key updated.');
-  };
-
-  const elRow = window.pfCreateElement('div', 'pf-form-row');
-  elRow.appendChild(elInputWrap);
-  elRow.appendChild(saveElBtn);
-  elInputWrap.style.flex = '1';
-
-  elGroup.appendChild(elRow);
-  elGroup.appendChild(window.pfCreateElement('div', 'pf-form-desc', { textContent: 'Required for voice feedback.' }));
-  generalSection.appendChild(elGroup);
-
-  // 4. MongoDB URI
-  const dbGroup = window.pfCreateElement('div', 'pf-form-group');
-  const dbInputWrap = window.PFInput({ label: 'MongoDB Connection URI', placeholder: 'mongodb+srv://...', id: 'db-uri' });
-  const dbInputDom = dbInputWrap.querySelector('input');
-
-  // We need to add get/set-mongodb-uri to ccBridge if not present, 
-  // but for now let's check store or just mock it.
-  // Actually, we should expose it.
-  
-  if (window.ccBridge) {
-    window.ccBridge.getMongodbUri().then(uri => { if (uri) dbInputDom.value = uri; });
-  }
-
-  const saveDbBtn = window.PFButton({ label: 'Save', variant: 'secondary' });
-  saveDbBtn.onclick = () => {
-    if (window.ccBridge) window.ccBridge.setMongodbUri(dbInputDom.value);
-    window.PFToast.show('Saved', 'Database URI updated. Restart app to reconnect.');
-  };
-
-  const dbRow = window.pfCreateElement('div', 'pf-form-row');
-  dbRow.appendChild(dbInputWrap);
-  dbRow.appendChild(saveDbBtn);
-  dbInputWrap.style.flex = '1';
-
-  dbGroup.appendChild(dbRow);
-  generalSection.appendChild(dbGroup);
+  // 4. MongoDB URI (may embed a username and password, so it is hidden too)
+  generalSection.appendChild(secretField({
+    id: 'db-uri',
+    label: 'MongoDB Connection URI',
+    placeholder: 'mongodb+srv://...',
+    desc: 'Stores agents, tasks and chat history. Restart the app after changing it.',
+    load: () => window.ccBridge.getMongodbUri(),
+    save: (value) => window.ccBridge.setMongodbUri(value),
+    savedMessage: 'Database URI updated. Restart app to reconnect.'
+  }));
 
   content.appendChild(generalSection);
 

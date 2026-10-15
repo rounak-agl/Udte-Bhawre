@@ -29,21 +29,54 @@ function PFButton({ label, variant = 'primary', size = 'md', icon, disabled, onC
   return btn;
 }
 
-function PFInput({ label, placeholder, type = 'text', value = '', disabled, onInput, id }) {
+const PF_EYE_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+const PF_EYE_OFF_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+/**
+ * @param {boolean} [revealable] - for type 'password': adds a show/hide button
+ */
+function PFInput({ label, placeholder, type = 'text', value = '', disabled, onInput, id, revealable = false }) {
   const wrapper = pfCreateElement('div', 'pf-input-wrapper');
-  
+
   const inputId = id || `pf-input-${Math.random().toString(36).substr(2, 9)}`;
-  
+
   if (label) {
     const lbl = pfCreateElement('label', 'pf-input-label', { textContent: label, for: inputId });
     wrapper.appendChild(lbl);
   }
-  
+
   const input = pfCreateElement('input', 'pf-input', { type, placeholder, id: inputId });
   input.value = value;
   if (disabled) input.disabled = true;
   if (onInput) input.addEventListener('input', (e) => onInput(e.target.value));
-  
+
+  if (revealable && type === 'password') {
+    // Secrets: never let the browser autofill/remember them, and offer show/hide
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('spellcheck', 'false');
+    const field = pfCreateElement('div', 'pf-input-secret');
+    const toggle = pfCreateElement('button', 'pf-input-reveal', {
+      type: 'button',
+      title: 'Show',
+      'aria-label': 'Show value',
+      'aria-pressed': 'false',
+      'aria-controls': inputId,
+      innerHTML: PF_EYE_ICON
+    });
+    toggle.addEventListener('click', () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      toggle.innerHTML = show ? PF_EYE_OFF_ICON : PF_EYE_ICON;
+      toggle.title = show ? 'Hide' : 'Show';
+      toggle.setAttribute('aria-label', show ? 'Hide value' : 'Show value');
+      toggle.setAttribute('aria-pressed', String(show));
+    });
+    field.appendChild(input);
+    field.appendChild(toggle);
+    wrapper.appendChild(field);
+    return wrapper;
+  }
+
   wrapper.appendChild(input);
   return wrapper;
 }

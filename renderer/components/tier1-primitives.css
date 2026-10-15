@@ -109,6 +109,40 @@
 .pf-input:focus {
   border-color: var(--pf-color-accent-primary);
 }
+/* Password field with a show/hide button inside its right edge */
+.pf-input-secret {
+  position: relative;
+  width: 100%;
+}
+.pf-input-secret .pf-input {
+  padding-right: 40px;
+}
+.pf-input-reveal {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--pf-radius-sm);
+  background: transparent;
+  color: var(--pf-color-text-muted);
+  cursor: pointer;
+  transition: background var(--pf-transition-fast), color var(--pf-transition-fast);
+}
+.pf-input-reveal:hover {
+  background: var(--pf-color-surface-hover);
+  color: var(--pf-color-text-primary);
+}
+.pf-input-reveal:focus-visible {
+  outline: 2px solid var(--pf-color-accent-primary);
+  outline-offset: 1px;
+}
+
 .pf-input:disabled {
   background: var(--pf-color-surface-tertiary);
   color: var(--pf-color-text-muted);

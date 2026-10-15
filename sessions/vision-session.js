@@ -2,6 +2,7 @@ const { GoogleGenAI } = require('@google/genai');
 const EventEmitter = require('events');
 const McpClientManager = require('./mcp-client');
 const { getMcpServers } = require('./agent-session');
+const { toGeminiContents } = require('./conversation-context');
 
 /**
  * Gemini Vision API Session with MCP Tool Support.
@@ -9,20 +10,28 @@ const { getMcpServers } = require('./agent-session');
  * with function calling for tool execution.
  */
 
-const SYSTEM_PROMPT = `You are a helpful desktop assistant that can see the user's screen.
-When the user asks a question, analyze the screenshot provided and give a clear, concise answer.
+// Screenshots are off to save API quota. While off, the prompt must not claim the model
+// can see the screen, or it invents bounding boxes for UI it has never seen.
+// Flip this (and see utils/screen-capture.js) to re-enable screen-aware step guides.
+const SCREENSHOTS_ENABLED = false;
 
-FORMATTING RULES:
+const INTRO_WITH_SCREEN = `You are a helpful desktop assistant that can see the user's screen.
+When the user asks a question, analyze the screenshot provided and give a clear, concise answer.`;
+
+const INTRO_WITHOUT_SCREEN = `You are a helpful desktop assistant. You CANNOT see the user's screen.
+If a question depends on what is on screen, ask the user to describe it instead of guessing.`;
+
+const FORMATTING_RULES = `FORMATTING RULES:
 - Use markdown formatting in your responses
-- Be concise and direct
+- Be concise and direct`;
 
-TOOL USAGE:
+const TOOL_RULES = `TOOL USAGE:
 - You have access to various tools (functions). Use them when the user's request requires an action.
 - For example: opening URLs, composing emails, creating calendar events, reading clipboard, etc.
 - When you use a tool, the result will be sent back to you. Use it to form your final response.
-- For simple questions that don't need tools, just answer directly.
+- For simple questions that don't need tools, just answer directly.`;
 
-BOUNDING BOX MODE:
+const BOUNDING_BOX_RULES = `BOUNDING BOX MODE:
 When the user asks "how to" do something on their screen (e.g., "how to create a pull request", 
 "how to open settings"), you MUST:
 1. Analyze the screenshot to identify the exact UI elements they need to interact with
@@ -45,10 +54,29 @@ BOUNDING BOX COORDINATE RULES (CRITICAL):
 If the screen doesn't show the relevant UI for the user's question, just answer with text normally.
 If you can see the relevant UI, ALWAYS include bounding boxes for interactive elements.`;
 
+/** Assemble the system instruction from what this session can actually do. */
+function buildSystemPrompt({ screenshots, tools, persona }) {
+  const sections = [
+    screenshots ? INTRO_WITH_SCREEN : INTRO_WITHOUT_SCREEN,
+    FORMATTING_RULES
+  ];
+  if (tools) sections.push(TOOL_RULES);
+  if (screenshots) sections.push(BOUNDING_BOX_RULES);
+  if (persona) sections.push(`AGENT INSTRUCTIONS (from this agent's context file):\n${persona}`);
+  return sections.join('\n\n');
+}
+
 class VisionSession extends EventEmitter {
-  constructor(screenCapture) {
+  /**
+   * @param {object} screenCapture - ScreenCapture service
+   * @param {object} [options]
+   * @param {boolean} [options.toolsEnabled=true] - expose built-in/MCP tools to the model
+   */
+  constructor(screenCapture, options = {}) {
     super();
     this.screenCapture = screenCapture; // reference to ScreenCapture service
+    this.toolsEnabled = options.toolsEnabled !== false;
+    this.systemPrompt = ''; // agent persona, set by the owning Character before start()
     this.ai = null;
     this.isRunning = false;
     this.isBusy = false;
@@ -56,10 +84,27 @@ class VisionSession extends EventEmitter {
     this.currentResponseText = '';
     this.mcpClient = new McpClientManager();
     this._conversationHistory = []; // Gemini conversation context
+    this._startPromise = null;
   }
 
-  /** Initialize with API key */
-  async start(apiKey) {
+  /**
+   * Seed the model's context with an earlier conversation (carried over from a previous
+   * session, or restored from the database) so the agent remembers it.
+   */
+  restoreContext(history) {
+    this._conversationHistory = toGeminiContents(history);
+  }
+
+  /**
+   * Initialize with API key. send() awaits this, so a message typed while MCP servers
+   * and the ArmorIQ guard are still starting can't run tools before the guard is ready.
+   */
+  start(apiKey) {
+    this._startPromise = this._start(apiKey);
+    return this._startPromise;
+  }
+
+  async _start(apiKey) {
     if (!apiKey) {
       this.emit('error', 'Gemini API key not set. Go to tray menu → Set API Key.');
       return;
@@ -68,9 +113,11 @@ class VisionSession extends EventEmitter {
     try {
       this.ai = new GoogleGenAI({ apiKey });
 
-      // Initialize MCP client with built-in tools
-      const mcpConfigs = getMcpServers() || {};
-      await this.mcpClient.initialize(mcpConfigs);
+      // Tools off → don't start the guard or launch any external MCP server processes
+      if (this.toolsEnabled) {
+        const mcpConfigs = getMcpServers() || {};
+        await this.mcpClient.initialize(mcpConfigs);
+      }
 
       // Forward security events from MCP client to session level
       this.mcpClient.on('security:intent-sealed', (data) => this.emit('security:intent-sealed', data));
@@ -80,8 +127,10 @@ class VisionSession extends EventEmitter {
 
       this.isRunning = true;
       this.emit('sessionReady');
-      console.log('[VisionSession] Initialized with gemini-2.0-flash + MCP tools');
-      console.log(`[VisionSession] Available tools: ${this.mcpClient.getAllFunctionDeclarations().map(t => t.name).join(', ')}`);
+      console.log(`[VisionSession] Initialized with gemini-2.5-flash (tools ${this.toolsEnabled ? 'on' : 'off'})`);
+      if (this.toolsEnabled) {
+        console.log(`[VisionSession] Available tools: ${this.mcpClient.getAllFunctionDeclarations().map(t => t.name).join(', ')}`);
+      }
     } catch (err) {
       this.emit('error', `Failed to initialize Gemini API: ${err.message}`);
     }
@@ -97,6 +146,14 @@ class VisionSession extends EventEmitter {
 
   /** Send a message with the latest screenshot */
   async send(message) {
+    if (this.isBusy) {
+      this.emit('error', 'Still processing the previous request. Please wait.');
+      return;
+    }
+
+    // Wait for start() to finish (MCP servers + guard) before any tool can run
+    if (this._startPromise) await this._startPromise;
+
     if (!this.ai) {
       this.emit('error', 'Vision session not started. Set your Gemini API key first.');
       return;
@@ -115,8 +172,8 @@ class VisionSession extends EventEmitter {
       // Build the multimodal prompt parts
       const parts = [];
 
-      // Add screenshot if available — disabled to save API limits
-      const screenshot = null; // this.screenCapture ? await this.screenCapture.captureNow() : null;
+      // Add screenshot if enabled (off by default to save API limits — see SCREENSHOTS_ENABLED)
+      const screenshot = SCREENSHOTS_ENABLED && this.screenCapture ? await this.screenCapture.captureNow() : null;
       if (screenshot) {
         parts.push({
           inlineData: {
@@ -132,8 +189,8 @@ class VisionSession extends EventEmitter {
       // Add user message to conversation history
       this._conversationHistory.push({ role: 'user', parts });
 
-      // Get tool declarations
-      const functionDeclarations = this.mcpClient.getAllFunctionDeclarations();
+      // Get tool declarations (none when tools are disabled for this agent / globally)
+      const functionDeclarations = this.toolsEnabled ? this.mcpClient.getAllFunctionDeclarations() : [];
       const tools = functionDeclarations.length > 0
         ? [{ functionDeclarations }]
         : undefined;
@@ -193,7 +250,11 @@ class VisionSession extends EventEmitter {
         contents: this._conversationHistory,
         config: {
           tools,
-          systemInstruction: SYSTEM_PROMPT
+          systemInstruction: buildSystemPrompt({
+            screenshots: SCREENSHOTS_ENABLED,
+            tools: !!tools,
+            persona: this.systemPrompt
+          })
         }
       });
 
@@ -329,7 +390,7 @@ class VisionSession extends EventEmitter {
     try {
       this._conversationHistory.push({ role: 'user', parts: [{ text: message }] });
 
-      const functionDeclarations = this.mcpClient.getAllFunctionDeclarations();
+      const functionDeclarations = this.toolsEnabled ? this.mcpClient.getAllFunctionDeclarations() : [];
       const tools = functionDeclarations.length > 0
         ? [{ functionDeclarations }]
         : undefined;

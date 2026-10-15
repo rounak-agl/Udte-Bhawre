@@ -76,6 +76,20 @@
   border-bottom: 1px solid var(--pf-color-border);
 }
 
+.pf-settings-subsection-title {
+  font-family: var(--pf-font-body);
+  font-size: var(--pf-font-size-caption);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pf-color-text-muted);
+  margin-top: var(--pf-spacing-md);
+}
+
+.pf-secret-status.is-warning {
+  color: var(--pf-color-warning);
+}
+
 /* Form Groups */
 .pf-form-group {
   display: flex;

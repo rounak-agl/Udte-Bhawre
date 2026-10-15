@@ -14,7 +14,8 @@ runBootstrap();
 
 const { getTaskbarGeometry, getCharacterY } = require('./utils/taskbar');
 const { isSoundsEnabled, toggleSounds } = require('./utils/sounds');
-const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getElevenLabsApiKey, setElevenLabsApiKey, getMongodbUri, setMongodbUri, getToolsEnabled, setToolsEnabled, getMcpServers, setMcpServers } = require('./sessions/agent-session');
+const { getCurrentProvider, setCurrentProvider, getProviderInfo, getAllProviders, getCurrentTheme, setCurrentTheme, getApiKey, setApiKey, getElevenLabsApiKey, setElevenLabsApiKey, getMongodbUri, setMongodbUri, getMcpServers, setMcpServers, API_KEY_PROVIDERS, apiKeyProviderFor, getAllProviderApiKeys, setProviderApiKey, migrateSecrets } = require('./sessions/agent-session');
+const { status: secretStatus } = require('./utils/secret-store');
 const { connectDB, isDBConnected, Agent, ChatSession, Task } = require('./utils/db');
 const ClaudeSession = require('./sessions/claude-session');
 const CodexSession = require('./sessions/codex-session');
@@ -35,6 +36,7 @@ const screenCapture = new ScreenCapture({ maxBuffer: 3 });
 
 let pendingEvents = [];
 let rendererReady = false;
+let stepGuideOwner = null; // the Character whose session produced the active step guide
 
 function emitSecurityEventToUI(type, data, charWindowOrMain) {
   const event = { type, data, ts: Date.now() };
@@ -132,8 +134,12 @@ class Character {
 
     // Database linkage
     this.agentId = null;
-    this.sessionId = null;
+    this.sessionId = null;            // ChatSession document the conversation is saved to
     this.systemPromptFile = null;
+    this.toolsEnabled = true;         // per-agent: desktop tools for Gemini Vision
+    this.restoredHistory = null;      // last saved conversation, loaded at launch
+    this.historyLoaded = Promise.resolve();
+    this._saveChain = Promise.resolve();
 
 
     // Internal flags
@@ -178,23 +184,37 @@ class Character {
     });
   }
 
-  createChatWindow() {
+  async createChatWindow() {
     if (this.chatWindow && !this.chatWindow.isDestroyed()) {
       this.chatWindow.show();
       this.chatWindow.focus();
       return;
     }
 
-    const taskbar = getTaskbarGeometry();
+    // Start the session before the window loads so its history can be replayed. The
+    // first time, wait for the last saved conversation to be restored from the DB.
+    if (!this.session) {
+      await this.historyLoaded;
+      if (!this.session) this.createSession();
+    }
+    // A second click may have opened the window while we were waiting
+    if (this.chatWindow && !this.chatWindow.isDestroyed()) {
+      this.chatWindow.show();
+      this.chatWindow.focus();
+      return;
+    }
+    if (!this.charWindow || this.charWindow.isDestroyed()) return; // agent deleted meanwhile
+
+    const { workArea } = getTaskbarGeometry();
     const charBounds = this.charWindow.getBounds();
 
     // Position the chat window above the character
     let chatX = charBounds.x - 150;
     let chatY = charBounds.y - 420;
 
-    // Keep within screen
-    chatX = Math.max(10, Math.min(chatX, taskbar.screenW - 370));
-    chatY = Math.max(10, chatY);
+    // Keep within the primary display's work area (absolute coords — it may not be at 0,0)
+    chatX = Math.max(workArea.x + 10, Math.min(chatX, workArea.x + workArea.width - 370));
+    chatY = Math.max(workArea.y + 10, chatY);
 
     this.chatWindow = new BrowserWindow({
       width: 360,
@@ -219,10 +239,14 @@ class Character {
     this.chatWindow.loadFile(path.join(__dirname, 'renderer', 'chat.html'));
 
     this.chatWindow.webContents.on('did-finish-load', () => {
-      this.chatWindow.webContents.send('theme-change', this.theme || getCurrentTheme());
-      this.chatWindow.webContents.send('provider-change', this.provider || getCurrentProvider());
+      // Initial state is applied silently (unlike 'provider-change', which announces a switch)
+      this.chatWindow.webContents.send('chat-init', {
+        theme: this.theme || getCurrentTheme(),
+        provider: this.provider || getCurrentProvider(),
+        toolsEnabled: this.toolsEnabled !== false
+      });
 
-      // Replay history if session exists
+      // Replay the conversation so reopening the chat continues where it left off
       if (this.session && this.session.history.length > 0) {
         this.chatWindow.webContents.send('chat-history', this.session.history);
       }
@@ -231,27 +255,48 @@ class Character {
     this.chatWindow.on('closed', () => {
       this.chatWindow = null;
     });
-
-    // Start or reuse session
-    if (!this.session) {
-      this.createSession();
-    }
   }
 
-  createSession() {
+  /**
+   * (Re)create the AI session for this agent.
+   * By default the current conversation is carried into the new session — or, for the
+   * first session after launch, the last conversation restored from the database — so
+   * the agent keeps its memory across settings changes and app restarts, and keeps
+   * saving to the same ChatSession document. `fresh: true` starts a new conversation
+   * (used when the saved conversation is deleted from the Control Centre).
+   */
+  createSession({ fresh = false } = {}) {
     const providerKey = this.provider || getCurrentProvider();
+    const carried = fresh ? [] : (this.session ? this.session.history : (this.restoredHistory || []));
+    this.restoredHistory = null;
     if (this.session) {
       this.session.terminate();
       this.session.removeAllListeners();
     }
+    if (fresh) {
+      this.sessionId = null;
+      this._conversationEpoch = (this._conversationEpoch || 0) + 1; // drop queued saves of the old one
+    }
+    this.stopThinking();
+
+    const visionOptions = { toolsEnabled: this.toolsEnabled !== false };
 
     switch (providerKey) {
-      case 'vision': this.session = new VisionSession(screenCapture); break;
+      case 'vision': this.session = new VisionSession(screenCapture, visionOptions); break;
       case 'claude': this.session = new ClaudeSession(); break;
       case 'codex': this.session = new CodexSession(); break;
       case 'copilot': this.session = new CopilotSession(); break;
       case 'gemini': this.session = new GeminiSession(); break;
-      default: this.session = new VisionSession(screenCapture); break;
+      default: this.session = new VisionSession(screenCapture, visionOptions); break;
+    }
+
+    // Agent persona/context file: applied before start so CLI providers get it at launch
+    this.session.systemPrompt = this.loadSystemPrompt();
+
+    // Conversation memory (errors are transient and not carried over)
+    this.session.history = carried.filter(m => m && m.role !== 'error').map(m => ({ ...m }));
+    if (typeof this.session.restoreContext === 'function') {
+      this.session.restoreContext(this.session.history);
     }
 
     // Wire up session events to chat window
@@ -265,7 +310,9 @@ class Character {
       if (this.chatWindow && !this.chatWindow.isDestroyed()) {
         this.chatWindow.webContents.send('chat-error', text);
       }
-      this.hideBubble();
+      // stopThinking, not hideBubble: many error paths never emit turnComplete, and the
+      // thinking interval would otherwise keep re-showing the bubble forever.
+      this.stopThinking();
     });
 
     this.session.on('toolUse', (name, input) => {
@@ -309,6 +356,7 @@ class Character {
     // Vision-specific: step guide event
     this.session.on('stepGuide', (steps) => {
       if (steps.length > 0) {
+        stepGuideOwner = this; // fly-to-element must move this agent, not characters[0]
         showOverlay();
         if (overlayWindow && !overlayWindow.isDestroyed()) {
           overlayWindow.webContents.send('show-step-guide', steps);
@@ -337,28 +385,33 @@ class Character {
       this.session.start();
     }
 
-   // Push system prompt if one is loaded
-    if (this.systemPromptFile) {
-      try {
-        const fs = require('fs');
-          const os = require('os');
-          let actualPromptPath = this.systemPromptFile;
-          if (actualPromptPath.startsWith('~/') || actualPromptPath.startsWith('~\\')) {
-            actualPromptPath = path.join(os.homedir(), actualPromptPath.slice(2));
-          } else if (actualPromptPath === '~') {
-            actualPromptPath = os.homedir();
-          }
-          const contextData = fs.readFileSync(actualPromptPath, 'utf-8');
-        if (contextData) {
-          // Send a hidden system injected prompt or just feed it as part of history.
-          // Since there is no explicit setSystemPrompt on generic sessions yet,
-          // we can simulate setting context inside the session history conceptually
-          // Though typically you'd need the provider to support it natively.
-          console.log('[System Prompt Loaded from]', this.systemPromptFile);
-        }
-      } catch (err) {
-        console.error('Failed to load system prompt:', err);
+  }
+
+  /**
+   * Read this agent's persona/context file (chosen in the Control Centre).
+   * Returns '' when unset or unreadable; capped so a huge file can't blow up every prompt.
+   */
+  loadSystemPrompt() {
+    if (!this.systemPromptFile) return '';
+    const MAX_PROMPT_BYTES = 64 * 1024;
+    try {
+      const fs = require('fs');
+      const os = require('os');
+      let promptPath = this.systemPromptFile;
+      if (promptPath.startsWith('~/') || promptPath.startsWith('~\\')) {
+        promptPath = path.join(os.homedir(), promptPath.slice(2));
       }
+      const { size } = fs.statSync(promptPath);
+      if (size > MAX_PROMPT_BYTES) {
+        console.warn(`[System Prompt] ${promptPath} is larger than ${MAX_PROMPT_BYTES} bytes — ignored`);
+        return '';
+      }
+      const text = fs.readFileSync(promptPath, 'utf-8').trim();
+      if (text) console.log('[System Prompt] Applied from', promptPath);
+      return text;
+    } catch (err) {
+      console.error('[System Prompt] Failed to load:', err.message);
+      return '';
     }
   }
 
@@ -441,16 +494,17 @@ class Character {
   flyTo(normX, normY) {
     if (!this.charWindow || this.charWindow.isDestroyed()) return;
 
-    const display = screen.getPrimaryDisplay();
-    const { width: sw, height: sh } = display.workAreaSize;
+    // normX/normY are fractions of the overlay, which covers the primary display's full
+    // bounds — so map onto those bounds, including their offset on multi-monitor setups.
+    const { x: dx, y: dy, width: sw, height: sh } = screen.getPrimaryDisplay().bounds;
     const bounds = this.charWindow.getBounds();
 
-    // Save current position for return
-    this.savedTaskbarPos = { x: bounds.x, y: bounds.y };
+    // Save current position for return (only once, if already flying between steps)
+    if (!this.savedTaskbarPos) this.savedTaskbarPos = { x: bounds.x, y: bounds.y };
 
     // Target position (offset to be beside the element, not on top)
-    const targetX = Math.round(normX * sw + (normX > 0.5 ? -80 : 40));
-    const targetY = Math.round(normY * sh - 40);
+    const targetX = Math.round(dx + normX * sw + (normX > 0.5 ? -80 : 40));
+    const targetY = Math.round(dy + normY * sh - 40);
 
     this.flyStartPos = { x: bounds.x, y: bounds.y };
     this.flyTargetPos = { x: targetX, y: targetY };
@@ -462,7 +516,7 @@ class Character {
   }
 
   returnToTaskbar() {
-    if (!this.savedTaskbarPos) {
+    if (!this.savedTaskbarPos || !this.charWindow || this.charWindow.isDestroyed()) {
       this.isFlying = false;
       return;
     }
@@ -600,38 +654,53 @@ class Character {
     }
   }
 
-  async saveSessionHistory() {
+  /**
+   * Queue a save of the current conversation. Saves run one at a time, so two quick
+   * turns can't both see "no sessionId yet" and create duplicate ChatSession documents.
+   */
+  saveSessionHistory() {
+    if (!this.session) return Promise.resolve();
+    // Stamp messages once so their timestamps don't change on every save
+    this.session.history.forEach(m => { if (!m.timestamp) m.timestamp = new Date(); });
+    const snapshot = this.session.history.slice();
+    const epoch = this._conversationEpoch || 0;
+    this._saveChain = this._saveChain.then(() => this._writeHistory(snapshot, epoch));
+    return this._saveChain;
+  }
+
+  async _writeHistory(history, epoch) {
     try {
       if (!this.agentId) return;
+      // The conversation was cleared/deleted after this save was queued — drop it
+      if (epoch !== (this._conversationEpoch || 0)) return;
       if (!isDBConnected()) {
         console.log('[DB] Not connected — skipping history save.');
         return;
       }
-      const { ChatSession } = require('./utils/db');
-      
+
       // Build messages array with safe text fallback
-      const messages = this.session.history.map(msg => ({
+      const messages = history.map(msg => ({
         role: msg.role || 'system',
         text: msg.text || `[${msg.role}]`,
         isTool: msg.isTool || msg.role === 'toolUse' || msg.role === 'toolResult' || false,
         timestamp: msg.timestamp || new Date()
       }));
 
-      if (!this.sessionId) {
-        // Create new session
-        const newSession = new ChatSession({
-          agentId: this.agentId,
-          title: this.session.history.filter(m => m.role === 'user').pop()?.text?.substring(0, 30) || 'New Conversation',
-          messages
-        });
-        const saved = await newSession.save();
-        this.sessionId = saved._id;
-      } else {
-        // Update existing
-        await ChatSession.findByIdAndUpdate(this.sessionId, {
+      let updated = null;
+      if (this.sessionId) {
+        updated = await ChatSession.findByIdAndUpdate(this.sessionId, {
           messages,
           updatedAt: new Date()
         });
+      }
+      // No conversation yet, or it was deleted from the Control Centre: start a new one
+      if (!updated) {
+        const saved = await new ChatSession({
+          agentId: this.agentId,
+          title: history.find(m => m.role === 'user')?.text?.substring(0, 30) || 'New Conversation',
+          messages
+        }).save();
+        this.sessionId = saved._id;
       }
       BrowserWindow.getAllWindows().forEach(w => {
         if (!w.isDestroyed()) w.webContents.send('history-updated');
@@ -691,6 +760,11 @@ app.on('web-contents-created', (_event, contents) => {
 //  App Lifecycle
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 app.whenReady().then(async () => {
+  // safeStorage only works from here on: encrypt any secrets still stored as plain text
+  const secrets = secretStatus();
+  const migrated = migrateSecrets();
+  console.log(`[Secrets] ${secrets.encrypted ? `Encrypted at rest (${secrets.backend || secrets.platform})` : '⚠️  No OS credential store — secrets stored unencrypted'}${migrated ? `; encrypted ${migrated} existing value(s)` : ''}`);
+
   // Start screen capture service
   screenCapture.start();
 
@@ -710,7 +784,7 @@ app.whenReady().then(async () => {
   openControlCentre('dashboard');
   
   // Init Control Centre
-  initControlCentre({ characters });
+  initControlCentre();
 
   setupTray();
   startUpdateLoop();
@@ -743,6 +817,9 @@ function setupTray() {
 }
 
 function rebuildTrayMenu() {
+  // Agents are restored from the DB before the tray exists; setupTray() builds the
+  // menu once it does. Throwing here used to abort startup after the first agent.
+  if (!tray) return;
   const allProviders = getAllProviders();
   const currentProviderKey = getCurrentProvider();
   const currentThemeName = getCurrentTheme();
@@ -766,24 +843,6 @@ function rebuildTrayMenu() {
       click: () => { toggleSounds(); rebuildTrayMenu(); }
     },
     {
-      label: 'Enable Tools',
-      type: 'checkbox',
-      checked: getToolsEnabled(),
-      click: () => {
-        setToolsEnabled(!getToolsEnabled());
-        // Recreate sessions with tools toggled
-        characters.forEach(c => {
-          if (c.session) {
-            c.session.terminate();
-            c.session.removeAllListeners();
-            c.session = null;
-          }
-          c.createSession();
-        });
-        rebuildTrayMenu();
-      }
-    },
-    {
       label: 'Provider',
       submenu: allProviders.map(p => ({
         label: p.name,
@@ -791,20 +850,13 @@ function rebuildTrayMenu() {
         checked: p.key === currentProviderKey,
         click: () => {
           setCurrentProvider(p.key);
-          // Terminate existing sessions and recreate with new provider
-          characters.forEach(c => {
-            if (c.session) {
-              c.session.terminate();
-              c.session.removeAllListeners();
-              c.session = null;
-            }
+          // Recreate open sessions with the new provider
+          restartSessions(c => {
             if (c.chatWindow && !c.chatWindow.isDestroyed()) {
-              c.chatWindow.webContents.send('provider-change', p.key);
+              c.chatWindow.webContents.send('provider-change', c.provider || p.key);
               // Clear any stale typing indicators
               c.chatWindow.webContents.send('chat-turn-complete');
             }
-            // Immediately recreate session with new provider
-            c.createSession();
           });
           rebuildTrayMenu();
         }
@@ -881,6 +933,19 @@ function rebuildTrayMenu() {
 }
 
 
+/**
+ * Apply a settings change to running agents. Only sessions that already exist (chats
+ * that were opened) are restarted; the rest are created lazily when their chat opens,
+ * so a settings change doesn't spawn a CLI / MCP servers for every agent at once.
+ * `notify(char)` runs first for each character, e.g. to message its open chat window.
+ */
+function restartSessions(notify) {
+  characters.forEach(c => {
+    if (notify) notify(c);
+    if (c.session) c.createSession();
+  });
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //  Update Loop (replaces CVDisplayLink)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -914,7 +979,7 @@ ipcMain.on('character-clicked', (event) => {
       clickedChar.isOnboarding = false;
       clickedChar.hideBubble();
     }
-    clickedChar.createChatWindow();
+    clickedChar.createChatWindow().catch(err => console.error('[Chat] Failed to open chat:', err));
   }
 });
 
@@ -947,13 +1012,49 @@ ipcMain.on('chat-send', (event, message) => {
   }
 });
 
-ipcMain.on('slash-command', (event, cmd) => {
-  const char = characters.find(c =>
+
+function charForChatSender(event) {
+  return characters.find(c =>
     c.chatWindow && !c.chatWindow.isDestroyed() && c.chatWindow.webContents === event.sender
   );
-  if (char && cmd === 'clear') {
-    if (char.session) {
-      char.session.history = [];
+}
+
+// Provider picker in a chat popover: switches that agent only (not the global default).
+// The conversation carries over to the new provider.
+ipcMain.on('chat-set-provider', async (event, providerKey) => {
+  const char = charForChatSender(event);
+  if (!char || !getAllProviders().some(p => p.key === providerKey)) return;
+
+  char.provider = providerKey;
+  char.chatWindow.webContents.send('provider-change', providerKey);
+  char.chatWindow.webContents.send('chat-turn-complete');
+  char.createSession();
+
+  // Persist for agents stored in the database
+  if (char.agentId && isDBConnected()) {
+    try {
+      await Agent.findByIdAndUpdate(char.agentId, { provider: providerKey });
+    } catch (err) {
+      console.error('[DB] Failed to save agent provider:', err.message);
+    }
+  }
+});
+
+// Tools toggle in a chat popover: enables/disables desktop tools for that agent only.
+// The conversation carries over; the setting is saved on the agent.
+ipcMain.on('chat-set-tools', async (event, enabled) => {
+  const char = charForChatSender(event);
+  if (!char || typeof enabled !== 'boolean') return;
+
+  char.toolsEnabled = enabled;
+  char.chatWindow.webContents.send('tools-change', enabled);
+  if (char.session) char.createSession();
+
+  if (char.agentId && isDBConnected()) {
+    try {
+      await Agent.findByIdAndUpdate(char.agentId, { toolsEnabled: enabled });
+    } catch (err) {
+      console.error('[DB] Failed to save agent tools setting:', err.message);
     }
   }
 });
@@ -1010,39 +1111,53 @@ ipcMain.on('set-mcp-servers', (event, rawServers) => {
   setMcpServers(servers);
   console.log('[MCP] Updated server configs in settings file.');
 
-  // 2. Reboot the AI sessions so it connects to the new servers immediately
-  characters.forEach(c => {
-    if (c.session) {
-      c.session.terminate();
-      c.session.removeAllListeners();
-      c.session = null;
-    }
-    // Recreate session with new tools
-    c.createSession();
-  });
+  // 2. Reboot open AI sessions so they connect to the new servers immediately
+  restartSessions();
 });
 
 // ── Vision / Overlay IPC ──
 ipcMain.on('set-api-key', (event, key) => {
   if (!requireControlCentre(event, 'set-api-key')) return;
   setApiKey(key);
-  // Recreate sessions so they use the new key
-  characters.forEach(c => {
-    if (c.session) {
-      c.session.terminate();
-      c.session.removeAllListeners();
-      c.session = null;
-    }
+  // Recreate open sessions so they use the new key
+  restartSessions(c => {
     if (c.chatWindow && !c.chatWindow.isDestroyed()) {
       c.chatWindow.webContents.send('api-key-changed');
     }
-    c.createSession();
   });
 });
 
 ipcMain.handle('get-api-key', (event) => {
   if (!requireControlCentre(event, 'get-api-key')) return '';
   return getApiKey();
+});
+
+// Whether secrets are encrypted at rest — shown in Control Centre → Settings
+ipcMain.handle('get-secret-storage-status', (event) => {
+  if (!requireControlCentre(event, 'get-secret-storage-status')) return null;
+  return secretStatus();
+});
+
+// ── Per-provider API keys (Gemini / Claude / Codex / Copilot) ──
+ipcMain.handle('get-provider-api-keys', (event) => {
+  if (!requireControlCentre(event, 'get-provider-api-keys')) return {};
+  return getAllProviderApiKeys();
+});
+
+ipcMain.on('set-provider-api-key', (event, provider, key) => {
+  if (!requireControlCentre(event, 'set-provider-api-key')) return;
+  if (!API_KEY_PROVIDERS[provider] || typeof key !== 'string' || key.length > 1000) return;
+  setProviderApiKey(provider, key.trim());
+
+  // Restart only the open sessions that use this key, so it applies right away.
+  // The conversation carries over (see createSession).
+  characters.forEach(c => {
+    if (!c.session || apiKeyProviderFor(c.provider || getCurrentProvider()) !== provider) return;
+    if (c.chatWindow && !c.chatWindow.isDestroyed()) {
+      c.chatWindow.webContents.send('api-key-changed');
+    }
+    c.createSession();
+  });
 });
 
 // ── Theme / Provider IPC (from CC Settings) ──
@@ -1062,17 +1177,11 @@ ipcMain.on('set-theme', (event, theme) => {
 ipcMain.on('set-provider', (event, providerKey) => {
   if (!requireControlCentre(event, 'set-provider')) return;
   setCurrentProvider(providerKey);
-  characters.forEach(c => {
-    if (c.session) {
-      c.session.terminate();
-      c.session.removeAllListeners();
-      c.session = null;
-    }
+  restartSessions(c => {
     if (c.chatWindow && !c.chatWindow.isDestroyed()) {
-      c.chatWindow.webContents.send('provider-change', providerKey);
+      c.chatWindow.webContents.send('provider-change', c.provider || providerKey);
       c.chatWindow.webContents.send('chat-turn-complete');
     }
-    c.createSession();
   });
   rebuildTrayMenu();
 });
@@ -1097,8 +1206,13 @@ ipcMain.handle('get-mongodb-uri', (event) => {
 });
 
 ipcMain.on('fly-to-element', (event, element) => {
-  // Fly the first character to the element position
-  const char = characters[0];
+  // Only the overlay drives step guides; element is normalized (0–1) screen coordinates
+  if (!overlayWindow || overlayWindow.isDestroyed() || event.sender !== overlayWindow.webContents) return;
+  const nums = element && [element.x, element.y, element.width, element.height];
+  if (!nums || !nums.every(n => typeof n === 'number' && Number.isFinite(n))) return;
+
+  // Fly the agent whose answer produced this guide (it may have been deleted since)
+  const char = characters.includes(stepGuideOwner) ? stepGuideOwner : characters[0];
   if (char) {
     char.flyTo(element.x + element.width / 2, element.y + element.height / 2);
   }
@@ -1106,6 +1220,7 @@ ipcMain.on('fly-to-element', (event, element) => {
 
 ipcMain.on('return-character', () => {
   characters.forEach(c => c.returnToTaskbar());
+  stepGuideOwner = null;
 });
 
 ipcMain.on('hide-overlay', () => {
@@ -1247,6 +1362,23 @@ async function loadAllAgentsFromDB() {
   }
 }
 
+/**
+ * Load an agent's most recently updated conversation from the database into
+ * `char.restoredHistory`; its first session starts from there (see createSession).
+ */
+async function loadLatestConversation(char) {
+  if (!char.agentId || !isDBConnected()) return;
+  try {
+    const latest = await ChatSession.findOne({ agentId: char.agentId }).sort({ updatedAt: -1 });
+    if (!latest || char.session) return; // nothing saved, or a session already started
+    char.sessionId = latest._id;
+    char.restoredHistory = latest.toObject().messages.map(({ role, text, isTool, timestamp }) => ({ role, text, isTool, timestamp }));
+    console.log(`[DB] Restored ${char.restoredHistory.length} messages for agent "${char.name}"`);
+  } catch (err) {
+    console.error('[DB] Failed to restore conversation:', err.message);
+  }
+}
+
 function launchAgentInstance(agentObj) {
   // Check if already launched
   const exists = characters.find(c => c.agentId === agentObj._id.toString());
@@ -1277,6 +1409,9 @@ function launchAgentInstance(agentObj) {
   // The Character instance needs its own provider handle
   char.provider = agentObj.provider;
   char.theme = agentObj.theme;
+  char.toolsEnabled = agentObj.toolsEnabled !== false;
+  // Restore the agent's most recent conversation so it picks up where it left off
+  char.historyLoaded = loadLatestConversation(char);
   
   rebuildTrayMenu();
 }
@@ -1373,6 +1508,34 @@ ipcMain.handle('get-chat-messages', async (event, sessionId) => {
   }
 });
 
+// Delete a saved conversation (Control Centre → Chat). If an agent is currently using
+// it, that agent forgets it and starts a new conversation.
+ipcMain.handle('delete-chat-session', async (event, sessionId) => {
+  if (!requireControlCentre(event, 'delete-chat-session')) return false;
+  if (!isDBConnected() || typeof sessionId !== 'string') return false;
+  try {
+    await ChatSession.findByIdAndDelete(sessionId);
+    characters
+      .filter(c => c.sessionId && c.sessionId.toString() === sessionId)
+      .forEach(c => {
+        c.restoredHistory = null;
+        if (c.session) {
+          c.createSession({ fresh: true });
+        } else {
+          c.sessionId = null;
+          c._conversationEpoch = (c._conversationEpoch || 0) + 1;
+        }
+        if (c.chatWindow && !c.chatWindow.isDestroyed()) {
+          c.chatWindow.webContents.send('chat-cleared');
+        }
+      });
+    return true;
+  } catch (err) {
+    console.error('[DB] delete-chat-session error:', err.message);
+    return false;
+  }
+});
+
 // ── Agent Management IPC ──
 ipcMain.handle('delete-agent', async (event, id) => {
   if (!requireControlCentre(event, 'delete-agent')) return false;
@@ -1396,19 +1559,4 @@ ipcMain.handle('delete-agent', async (event, id) => {
   }
 });
 
-module.exports = { 
-  launchAgentInstance, 
-  openControlCentre,
-  createSessionForAgent: (agentObj) => {
-    // Shared utility for background/CC chat (though currently read-only)
-    const providerKey = agentObj.provider || getCurrentProvider();
-    switch (providerKey) {
-      case 'vision': return new VisionSession(screenCapture);
-      case 'claude': return new ClaudeSession();
-      case 'codex': return new CodexSession();
-      case 'copilot': return new CopilotSession();
-      case 'gemini': return new GeminiSession();
-      default: return new VisionSession(screenCapture);
-    }
-  }
-};
+module.exports = { launchAgentInstance, openControlCentre };

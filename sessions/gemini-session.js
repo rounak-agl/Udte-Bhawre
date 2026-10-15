@@ -1,5 +1,7 @@
 const spawn = require('cross-spawn'); // no shell: user text must never reach sh/cmd.exe
 const { findBinary, getProcessEnv } = require('../utils/shell-env');
+const { getProviderEnv } = require('./agent-session');
+const { buildTranscript } = require('./conversation-context');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -17,6 +19,7 @@ class GeminiSession extends EventEmitter {
     this.isRunning = false;
     this.isBusy = false;
     this.history = [];
+    this.systemPrompt = ''; // agent persona, set by the owning Character before start()
     this.lineBuffer = '';
     this.currentResponseText = '';
     this.lastSentMessage = '';
@@ -82,11 +85,16 @@ class GeminiSession extends EventEmitter {
     }
 
     try {
-      const env = getProcessEnv();
+      const env = { ...getProcessEnv(), ...getProviderEnv('gemini') }; // + this provider's API key, if set
       const home = os.homedir();
 
-      // Prepend context so Gemini acts as a chat assistant, not a code agent
-      const chatPrompt = `You are a helpful desktop assistant. Answer the user's question directly and concisely. Do NOT try to run commands or use tools - just provide a clear text answer.\n\nUser: ${message}`;
+      // Prepend context so Gemini acts as a chat assistant, not a code agent,
+      // plus the agent's persona/context file when one is configured
+      const persona = this.systemPrompt ? `\n\nAgent instructions:\n${this.systemPrompt}` : '';
+      // Each message is a fresh gemini process with no memory: include recent turns
+      const earlier = buildTranscript(this.history.slice(0, -1));
+      const conversation = earlier ? `\n\nConversation so far:\n${earlier}` : '';
+      const chatPrompt = `You are a helpful desktop assistant. Answer the user's question directly and concisely. Do NOT try to run commands or use tools - just provide a clear text answer.${persona}${conversation}\n\nUser: ${message}`;
 
       // Args: non-interactive, stream-json output
       const args = [
@@ -117,11 +125,18 @@ class GeminiSession extends EventEmitter {
         });
       }
 
-      this.process.stdout.on('data', (data) => {
+      // A killed process exits asynchronously: ignore its late events so they can't
+      // leak into (or prematurely complete) the next turn.
+      const proc = this.process;
+      const isCurrent = () => this.process === proc;
+
+      proc.stdout.on('data', (data) => {
+        if (!isCurrent()) return;
         this._processOutput(data.toString('utf8'));
       });
 
-      this.process.stderr.on('data', (data) => {
+      proc.stderr.on('data', (data) => {
+        if (!isCurrent()) return;
         const errText = data.toString('utf8').trim();
         if (!errText) return;
 
@@ -143,7 +158,10 @@ class GeminiSession extends EventEmitter {
         }
       });
 
-      this.process.on('exit', (code) => {
+      // 'close' (not 'exit'): fires only after stdout is drained, so the reply is complete
+      proc.on('close', (code) => {
+        if (!isCurrent()) return;
+        this.process = null;
         if (this.lineBuffer.trim()) {
           this._parseLine(this.lineBuffer.trim());
           this.lineBuffer = '';
@@ -164,7 +182,8 @@ class GeminiSession extends EventEmitter {
         this.currentResponseText = '';
       });
 
-      this.process.on('error', (err) => {
+      proc.on('error', (err) => {
+        if (!isCurrent()) return;
         this.isBusy = false;
         this.emit('error', `Failed to launch Gemini: ${err.message}`);
       });
@@ -176,9 +195,10 @@ class GeminiSession extends EventEmitter {
   }
 
   terminate() {
-    if (this.process) {
-      try { this.process.kill(); } catch (e) { /* */ }
-      this.process = null;
+    const proc = this.process;
+    this.process = null; // detach first so the dying process's late events are ignored
+    if (proc) {
+      try { proc.kill(); } catch (e) { /* */ }
     }
     this.isRunning = false;
     this.isBusy = false;
