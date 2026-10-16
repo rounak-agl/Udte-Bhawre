@@ -26,6 +26,11 @@ type Body = {
   placed: boolean;
   anchor: HTMLDivElement | null;
   seed: number;
+  prev: THREE.Vector2;
+  angle: number;
+  angVel: number;
+  phase: number;
+  wanderAt: number;
 };
 
 type Props = {
@@ -232,11 +237,33 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
           const seed = ++seedN + t.key.length;
           const rig = new ToyRig(t.id, t.hex, seed);
           sc.add(rig.parts.root);
-          b = { rig, pos: new THREE.Vector2(t.spawn?.x ?? t.x, t.spawn?.y ?? t.y), vel: new THREE.Vector2(), home: new THREE.Vector2(t.x, t.y), size: t.size ?? 64, held: false, tossed: false, placed: false, anchor: null, seed };
+          b = {
+            rig,
+            pos: new THREE.Vector2(t.spawn?.x ?? t.x, t.spawn?.y ?? t.y),
+            vel: new THREE.Vector2(),
+            home: new THREE.Vector2(t.x, t.y),
+            size: t.size ?? 64,
+            held: false,
+            tossed: false,
+            placed: false,
+            anchor: null,
+            seed,
+            prev: new THREE.Vector2(t.spawn?.x ?? t.x, t.spawn?.y ?? t.y),
+            angle: 0,
+            angVel: 0,
+            phase: 0,
+            wanderAt: now + 4000 + Math.random() * 6000,
+          };
+          if (t.spawn && t.state === "hatching") {
+            b.tossed = true;
+            b.vel.set(-140 - Math.random() * 90, -460);
+            b.angVel = -4 - Math.random() * 3;
+          }
           bodies.current.set(t.key, b);
           if (t.state === "hatching") rig.setState("hatching");
         }
         b.size = t.size ?? 64;
+        const ground = t.y;
         if (!b.placed && !b.tossed && !(drag && drag.key === t.key)) b.home.set(t.x, t.y);
         const isDrag = !!drag && drag.key === t.key && drag.moved;
         b.held = isDrag;
@@ -247,62 +274,89 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         if (b.rig.state !== "hatching" || s === "returning") b.rig.setState(s);
 
         let walk = 0;
-        if (!isDrag) {
-          if (b.tossed) {
-            b.pos.addScaledVector(b.vel, dt);
-            b.vel.multiplyScalar(Math.exp(-2.4 * dt));
-            b.vel.y += 2200 * dt;
-            const m = b.size * 0.6;
-            const floorY = L.float ? H - 12 : b.home.y;
-            if (b.pos.x < m) {
-              b.pos.x = m;
-              b.vel.x = Math.abs(b.vel.x) * 0.55;
-              b.rig.land(0.6);
-            }
-            if (b.pos.x > W - m) {
-              b.pos.x = W - m;
-              b.vel.x = -Math.abs(b.vel.x) * 0.55;
-              b.rig.land(0.6);
-            }
-            if (b.pos.y < b.size * 1.6) {
-              b.pos.y = b.size * 1.6;
-              b.vel.y = Math.abs(b.vel.y) * 0.5;
-            }
-            if (b.pos.y > floorY) {
-              b.pos.y = floorY;
-              const imp = Math.min(1, Math.abs(b.vel.y) / 1400);
-              b.vel.y = -Math.abs(b.vel.y) * 0.42;
-              if (imp > 0.08) b.rig.land(imp);
-            }
-            if (b.vel.length() < 30) {
+        if (isDrag) {
+          const vx = (b.pos.x - b.prev.x) / Math.max(dt, 1e-3);
+          const target = THREE.MathUtils.clamp(-vx * 0.0011, -0.95, 0.95);
+          b.angVel += ((target - b.angle) * 120 - b.angVel * 8) * dt;
+          b.angle += b.angVel * dt;
+        } else if (b.tossed) {
+          b.pos.addScaledVector(b.vel, dt);
+          b.vel.x *= Math.exp(-0.9 * dt);
+          b.vel.y += 2400 * dt;
+          b.angle += b.angVel * dt;
+          b.angVel *= Math.exp(-1.1 * dt);
+          const m = b.size * 0.6;
+          const floorY = L.float ? ground : b.home.y;
+          if (b.pos.x < m) {
+            b.pos.x = m;
+            b.vel.x = Math.abs(b.vel.x) * 0.5;
+            b.angVel = -b.angVel * 0.6;
+            b.rig.land(0.5);
+          }
+          if (b.pos.x > W - m) {
+            b.pos.x = W - m;
+            b.vel.x = -Math.abs(b.vel.x) * 0.5;
+            b.angVel = -b.angVel * 0.6;
+            b.rig.land(0.5);
+          }
+          if (b.pos.y < b.size * 1.6) {
+            b.pos.y = b.size * 1.6;
+            b.vel.y = Math.abs(b.vel.y) * 0.4;
+          }
+          if (b.pos.y >= floorY) {
+            b.pos.y = floorY;
+            const imp = Math.min(1, Math.abs(b.vel.y) / 1500);
+            b.vel.y = -Math.abs(b.vel.y) * 0.38;
+            b.vel.x *= 0.7;
+            b.angVel = b.angVel * 0.35 - b.angle * 6;
+            if (imp > 0.06) b.rig.land(imp);
+            if (Math.abs(b.vel.y) < 90) {
               b.tossed = false;
               b.vel.set(0, 0);
-              if (L.float) {
-                b.home.copy(b.pos);
+              if (L.float && b.rig.state !== "hatching") {
+                b.home.set(b.pos.x, ground);
                 b.placed = true;
               }
             }
-          } else {
-            const goHome = t.state === "returning" && t.spawn;
-            const hx = goHome ? t.spawn!.x : b.home.x;
-            const hy = goHome ? t.spawn!.y : b.home.y;
-            const dx = hx - b.pos.x;
-            const dy = hy - b.pos.y;
-            const dist = Math.hypot(dx, dy);
-            if (L.reduced || dist < 1) {
-              b.pos.set(hx, hy);
-            } else {
-              const step = Math.min(dist, (b.rig.state === "hatching" ? 260 : 170) * dt);
-              b.pos.x += (dx / dist) * step;
-              b.pos.y += (dy / dist) * step;
-              walk = Math.abs(dx) > 2 ? Math.sign(dx) : 0.001;
+          }
+        } else {
+          b.angVel += (-b.angle * 160 - b.angVel * 11) * dt;
+          b.angle += b.angVel * dt;
+          const busy = t.state !== "idle" || hoverKey.current === t.key || dropKey.current === t.key;
+          if (L.float && !L.reduced && !busy && now > b.wanderAt) {
+            b.wanderAt = now + 6000 + Math.random() * 8000;
+            const span = b.size * (1.5 + Math.random() * 2.5);
+            const dir = Math.random() < 0.5 ? -1 : 1;
+            const lo = Math.max(b.size, t.x - 260);
+            const hi = Math.min(W - 120, t.x + 260);
+            let tx = THREE.MathUtils.clamp(b.pos.x + dir * span, lo, hi);
+            for (const [ok, ob] of bodies.current) {
+              if (ok !== t.key && Math.abs(ob.home.x - tx) < b.size * 1.3) tx = THREE.MathUtils.clamp(b.pos.x - dir * span, lo, hi);
             }
+            b.home.set(tx, ground);
+            b.placed = true;
+          }
+          const goHome = t.state === "returning" && t.spawn;
+          const hx = goHome ? t.spawn!.x : b.home.x;
+          const hy = L.float ? ground : b.home.y;
+          const dx = hx - b.pos.x;
+          b.pos.y += (hy - b.pos.y) * Math.min(1, dt * 12);
+          if (L.reduced || Math.abs(dx) < 1) {
+            b.pos.x = hx;
+          } else {
+            const speed = b.rig.state === "hatching" ? 150 : goHome ? 120 : 52 + b.size * 0.5;
+            const step = Math.min(Math.abs(dx), speed * dt);
+            b.pos.x += Math.sign(dx) * step;
+            b.phase += step / (b.size * 0.42);
+            walk = Math.sign(dx);
           }
         }
+        b.prev.copy(b.pos);
 
         const root = b.rig.parts.root;
-        root.position.set(b.pos.x, -b.pos.y, 0);
-        root.rotation.x = L.tilt;
+        const c = b.size * b.rig.parts.height * 0.5;
+        root.position.set(b.pos.x + c * Math.sin(b.angle), -b.pos.y + c - c * Math.cos(b.angle), 0);
+        root.rotation.set(L.tilt, 0, b.angle);
         const headY = b.pos.y - b.size * b.rig.parts.height;
         const look = {
           x: THREE.MathUtils.clamp((pointer.x - b.pos.x) / 260, -1, 1),
@@ -312,10 +366,27 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
           look.x = 0;
           look.y = 0;
         }
-        b.rig.update(dt, { look, speed: 1, reduced: L.reduced, intensity: L.intensity, walk });
+        b.rig.update(dt, { look, speed: 1, reduced: L.reduced, intensity: L.intensity, walk, stride: b.phase });
         root.scale.multiplyScalar(b.size);
         const el = anchors.current.get(t.key);
         if (el) el.style.transform = `translate3d(${b.pos.x}px, ${headY}px, 0)`;
+      }
+      const list = [...bodies.current.values()].filter((b) => !b.tossed && !b.held);
+      for (let i = 0; i < list.length; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const a = list[i];
+          const o = list[j];
+          const min = (a.size + o.size) * 0.62;
+          const d = o.pos.x - a.pos.x;
+          if (Math.abs(d) < min && Math.abs(o.pos.y - a.pos.y) < 40) {
+            const push = (min - Math.abs(d)) * 0.5 * Math.min(1, dt * 8);
+            const sgn = d === 0 ? 1 : Math.sign(d);
+            a.pos.x -= sgn * push;
+            o.pos.x += sgn * push;
+            if (a.placed) a.home.x = a.pos.x;
+            if (o.placed) o.home.x = o.pos.x;
+          }
+        }
       }
       renderer.render(sc, camera);
     };
