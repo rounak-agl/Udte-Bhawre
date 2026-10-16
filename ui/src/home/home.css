@@ -251,7 +251,7 @@
   color: var(--text);
 }
 .did__cell:hover .did__n {
-  color: color-mix(in srgb, var(--c) 70%, #111);
+  color: color-mix(in srgb, var(--c) 72%, var(--text));
 }
 .did__unit {
   font-size: var(--text-sm);
@@ -606,4 +606,17 @@
   font-family: var(--mono);
   font-size: var(--text-xs);
   cursor: grab;
+}
+[data-native] .home__nav {
+  padding-top: 48px;
+}
+[data-native] .home::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 150px;
+  height: 40px;
+  z-index: var(--z-sticky);
+  -webkit-app-region: drag;
 }

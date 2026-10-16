@@ -25,6 +25,7 @@ import { CREW, crewById, type CrewId } from "../crew/roster";
 import { CrewFace } from "../crew/CrewFace";
 import { ToyStage } from "../crew/ToyStage";
 import { SEED_THREADS } from "../sim/scripts";
+import { setTheme, useTheme, type ThemePref } from "../lib/theme";
 import "./home.css";
 
 type Place = "today" | "crew" | "threads" | "connections" | "settings";
@@ -318,7 +319,8 @@ const MODELS = [
 ];
 
 function SettingsPlace() {
-  const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
+  const { pref } = useTheme();
+  const [theme, setPref] = useState<ThemePref>(pref);
   return (
     <div className="page">
       <header className="page__head">
@@ -372,8 +374,8 @@ function SettingsPlace() {
           label="Theme"
           value={theme}
           onChange={(v) => {
+            setPref(v);
             setTheme(v);
-            document.documentElement.dataset.theme = v === "dark" ? "dark" : "light";
           }}
           options={[
             { value: "system", label: "System" },

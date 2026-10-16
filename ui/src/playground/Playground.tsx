@@ -12,6 +12,7 @@ import { sim, useWorld } from "../sim/store";
 import { Portal } from "../stage/Portal";
 import { ToyOverlay } from "../stage/ToyOverlay";
 import { Frame } from "./Frame";
+import { setTheme, type ThemePref } from "../lib/theme";
 import "./playground.css";
 
 type Scene = "desktop" | "first-run" | "home";
@@ -44,10 +45,10 @@ export default function Playground() {
     "Director",
     {
       Stage: {
-        wallpaper: { type: "select", options: ["paper", "ground", "ink"], default: "paper" },
-        dark: false,
+        wallpaper: { type: "select", options: ["match theme", "ground", "ink"], default: "match theme" },
+        theme: { type: "select", options: ["system", "light", "dark"], default: "system" },
         reduced: false,
-        size: [48, 32, 96, 2],
+        size: [42, 30, 96, 2],
         breathing: [1, 0, 2, 0.05],
         speed: [1, 0.25, 3, 0.25],
       },
@@ -86,9 +87,7 @@ export default function Playground() {
     },
   );
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = d.Stage.dark ? "dark" : "light";
-  }, [d.Stage.dark]);
+  useEffect(() => setTheme(d.Stage.theme as ThemePref), [d.Stage.theme]);
   useEffect(() => sim.setSpeed(d.Stage.speed), [d.Stage.speed]);
   useEffect(() => {
     if (scene === "first-run") {
@@ -100,7 +99,7 @@ export default function Playground() {
   }, [scene]);
 
   const portal = { x: area.w - 18 - 28, y: area.h - 14 - 28 };
-  const slotX = (i: number) => area.w - 110 - i * 78;
+  const slotX = (i: number) => area.w - 104 - i * 70;
   const toys: StageToy[] = useMemo(
     () =>
       world.summoned.map((id, i) => {
@@ -126,7 +125,7 @@ export default function Playground() {
 
   return (
     <div className={`pg ${d.Stage.wallpaper === "ink" ? "is-night" : ""}`}>
-      <div className={`wall wall--${d.Stage.wallpaper}`} />
+      <div className={`wall wall--${d.Stage.wallpaper === "match theme" ? "paper" : d.Stage.wallpaper}`} />
       <div className="scene-tabs">
         <Segmented<Scene>
           label="Scene"

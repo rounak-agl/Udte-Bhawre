@@ -42,6 +42,9 @@ const { migrateSecrets, getMongodbUri } = require('./sessions/agent-session');
 const { status: secretStatus } = require('./utils/secret-store');
 const { connectDB } = require('./utils/db');
 const { markInterruptedTasks } = require('./app/orchestrator');
+const { registerCrewIpc, startCrewUI } = require('./app/crew-ui');
+
+const CREW_UI = process.env.CREW_UI === '1';
 
 // ── Security + IPC (registered at load, before any window exists) ──
 installNavigationGuards(app);
@@ -53,6 +56,7 @@ registerSettingsIpc();
 registerMarketplaceIpc();
 registerOrchestrationIpc();
 registerControlCentreIpc();
+registerCrewIpc();
 
 // ── Lifecycle ──
 app.whenReady().then(async () => {
@@ -73,8 +77,12 @@ app.whenReady().then(async () => {
     console.error('[DB] Connection/Load failed:', e);
   }
 
-  openControlCentre('dashboard');
   setupTray();
+  if (CREW_UI) {
+    startCrewUI();
+    return;
+  }
+  openControlCentre('dashboard');
   startWalkLoop();
 });
 

@@ -156,7 +156,20 @@ export const sim = {
   setSpeed(s: number) {
     world = { ...world, speed: s };
   },
+  snapshot() {
+    return world;
+  },
+  hydrate(w: World) {
+    world = w;
+    emit();
+  },
+  subscribe(f: () => void) {
+    subs.add(f);
+    return () => subs.delete(f);
+  },
 };
+
+export type { World };
 
 export function useWorld() {
   return useSyncExternalStore(

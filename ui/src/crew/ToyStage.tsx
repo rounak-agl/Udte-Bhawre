@@ -38,16 +38,17 @@ type Props = {
   onToyDrop?: (key: string, data: DataTransfer) => void;
   onToyMove?: (key: string, x: number, y: number) => void;
   overlay?: (toy: StageToy) => ReactNode;
+  onHoverChange?: (key: string | null) => void;
   className?: string;
 };
 
-export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0.14, onToyClick, onToyDrop, onToyMove, overlay, className }: Props) {
+export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0.14, onToyClick, onToyDrop, onToyMove, overlay, onHoverChange, className }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bodies = useRef(new Map<string, Body>());
   const scene = useRef<THREE.Scene | null>(null);
-  const live = useRef({ toys, float, intensity, reduced: !!reduced, tilt, onToyClick, onToyDrop, onToyMove });
-  live.current = { toys, float, intensity, reduced: !!reduced, tilt, onToyClick, onToyDrop, onToyMove };
+  const live = useRef({ toys, float, intensity, reduced: !!reduced, tilt, onToyClick, onToyDrop, onToyMove, onHoverChange });
+  live.current = { toys, float, intensity, reduced: !!reduced, tilt, onToyClick, onToyDrop, onToyMove, onHoverChange };
   const anchors = useRef(new Map<string, HTMLDivElement>());
   const hoverKey = useRef<string | null>(null);
   const dropKey = useRef<string | null>(null);
@@ -73,6 +74,17 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
     rim.position.set(4, 2, -3);
     const fill = new THREE.HemisphereLight(0xffffff, 0xd9d4cc, 0.9);
     sc.add(key, rim, fill);
+    const light = () => {
+      const dark = document.documentElement.dataset.theme === "dark";
+      rim.intensity = dark ? 2.2 : 0.9;
+      rim.color.set(dark ? 0xcfdcff : 0xdfe8ff);
+      fill.intensity = dark ? 0.75 : 0.9;
+      fill.groundColor.set(dark ? 0x2a2a2a : 0xd9d4cc);
+      renderer.toneMappingExposure = dark ? 1.08 : 1;
+    };
+    light();
+    const mo = new MutationObserver(light);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
     const camera = new THREE.OrthographicCamera(0, 1, 0, -1, -2000, 2000);
     camera.position.z = 500;
@@ -127,6 +139,7 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         return;
       }
       const k = pick(p.x, p.y);
+      if (k !== hoverKey.current) live.current.onHoverChange?.(k);
       hoverKey.current = k;
       host.style.cursor = k ? "grab" : "";
     };
@@ -163,6 +176,7 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
     };
     const onLeave = () => {
       pointer.set(-9999, -9999);
+      if (hoverKey.current) live.current.onHoverChange?.(null);
       hoverKey.current = null;
     };
     const nearest = (x: number, y: number) => {
@@ -310,6 +324,7 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      mo.disconnect();
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointerup", onUp);

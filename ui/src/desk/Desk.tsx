@@ -33,13 +33,14 @@ type Props = {
   onPin?: () => void;
   onRetry?: () => void;
   onDragStart?: (e: React.PointerEvent) => void;
+  native?: boolean;
 };
 
 function fmtSize(n: number) {
   return n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`;
 }
 
-export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDecide, onPickCrew, onPin, onRetry, onDragStart }: Props) {
+export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDecide, onPickCrew, onPin, onRetry, onDragStart, native }: Props) {
   const crew = crewById(crewId);
   const [text, setText] = useState("");
   const [files, setFiles] = useState<{ name: string; size: string }[]>([]);
@@ -69,7 +70,7 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
 
   const main = (
     <div className="desk__main">
-      <header className="desk__head" onPointerDown={onDragStart}>
+      <header className={`desk__head ${native ? "is-native" : ""}`} onPointerDown={native ? undefined : onDragStart}>
         <span className="desk__id">
           <CrewFace id={crew.id} color={crew.color} size={30} mood={live.state === "done" ? "happy" : live.state === "sleeping" ? "sleep" : "idle"} />
           <span className="desk__names">
@@ -222,14 +223,14 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
 
   if (mode !== "focus") {
     return (
-      <div className={`desk desk--${mode}`} style={style}>
+      <div className={`desk desk--${mode} ${native ? "is-native" : ""}`} style={style}>
         {main}
       </div>
     );
   }
 
   return (
-    <div className="desk desk--focus" style={style}>
+    <div className={`desk desk--focus ${native ? "is-native" : ""}`} style={style}>
       <nav className="rail" aria-label="Crew">
         {CREW.map((c) => (
           <button key={c.id} type="button" className={`rail__btn ${c.id === crewId ? "is-on" : ""}`} style={{ "--c": c.color } as CSSProperties} aria-label={c.name} data-tip={c.name} onClick={() => onPickCrew?.(c.id)}>
