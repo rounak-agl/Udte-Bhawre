@@ -1,0 +1,69 @@
+[data-press] {
+  transition: transform var(--dur-instant) var(--ease-smooth);
+}
+[data-press]:active {
+  transform: scale(var(--press-scale));
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes pulse-soft {
+  50% {
+    opacity: 0.5;
+  }
+}
+@keyframes cell-lit {
+  0% {
+    opacity: 1;
+  }
+  33% {
+    opacity: 0.15;
+  }
+}
+@keyframes rule-pulse {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  40% {
+    transform: scaleY(1.6);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rise {
+    animation: rise-in var(--dur-moderate) var(--ease-smooth) both;
+    animation-delay: calc(min(var(--i, 0), 12) * 40ms);
+  }
+  .fade {
+    animation: fade-in var(--dur-fast) var(--ease-smooth) both;
+  }
+  .pop {
+    animation: pop-in var(--dur-moderate) var(--ease-smooth) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: var(--dur-instant) !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--dur-instant) !important;
+  }
+}

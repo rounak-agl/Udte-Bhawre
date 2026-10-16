@@ -5,3 +5,5 @@ out/
 .DS_Store
 Thumbs.db
 BUGS.md
+.shots/
+.playwright-mcp/

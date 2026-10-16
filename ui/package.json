@@ -1,0 +1,29 @@
+{
+  "name": "desktop-assistant-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p .",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "^0.186.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "agentation": "^3.1.2",
+    "dialkit": "^2.0.2",
+    "geist": "^1.7.2",
+    "gsap": "^3.15.0",
+    "lucide-react": "^1.49.0",
+    "motion": "^13.5.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "three": "^0.186.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.2"
+  }
+}

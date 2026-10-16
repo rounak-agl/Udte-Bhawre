@@ -1,0 +1,193 @@
+.pg {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+.wall {
+  position: absolute;
+  inset: 0;
+  transition: background var(--dur-slow) var(--ease-smooth);
+}
+.wall--paper {
+  background: var(--paper);
+}
+.wall--ground {
+  background: var(--ground);
+}
+.wall--ink {
+  background: #121212;
+}
+.desk-area {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 48px;
+}
+.taskbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--surface);
+  border-top: 1px solid var(--rule);
+  font-size: 12px;
+  color: #222;
+}
+:root[data-theme="dark"] .taskbar,
+.pg.is-night .taskbar {
+  background: #181818;
+  border-top-color: #2a2a2a;
+  color: #ddd;
+}
+.taskbar__app {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+.taskbar__app i {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  background: var(--a);
+}
+.taskbar__tray {
+  position: absolute;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.taskbar__start {
+  display: grid;
+  grid-template-columns: repeat(2, 9px);
+  gap: 2px;
+  margin-right: 4px;
+}
+.taskbar__start i {
+  width: 9px;
+  height: 9px;
+  background: #2f6bff;
+  border-radius: 1px;
+}
+
+.frame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: var(--z-modal);
+  border-radius: var(--radius-3);
+  box-shadow: 0 0 0 1px var(--text);
+  animation: frame-in var(--dur-moderate) var(--ease-smooth) both;
+}
+.frame.is-anim {
+  transition:
+    transform var(--dur-slow) var(--ease-swing),
+    width var(--dur-slow) var(--ease-swing),
+    height var(--dur-slow) var(--ease-swing);
+}
+@keyframes frame-in {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+}
+.rs {
+  position: absolute;
+  z-index: 5;
+}
+.rs--n,
+.rs--s {
+  left: 10px;
+  right: 10px;
+  height: 8px;
+  cursor: ns-resize;
+}
+.rs--n {
+  top: -4px;
+}
+.rs--s {
+  bottom: -4px;
+}
+.rs--e,
+.rs--w {
+  top: 10px;
+  bottom: 10px;
+  width: 8px;
+  cursor: ew-resize;
+}
+.rs--e {
+  right: -4px;
+}
+.rs--w {
+  left: -4px;
+}
+.rs--ne,
+.rs--nw,
+.rs--se,
+.rs--sw {
+  width: 14px;
+  height: 14px;
+}
+.rs--ne {
+  top: -5px;
+  right: -5px;
+  cursor: nesw-resize;
+}
+.rs--sw {
+  bottom: -5px;
+  left: -5px;
+  cursor: nesw-resize;
+}
+.rs--nw {
+  top: -5px;
+  left: -5px;
+  cursor: nwse-resize;
+}
+.rs--se {
+  bottom: -5px;
+  right: -5px;
+  cursor: nwse-resize;
+}
+.snap-ghost {
+  position: absolute;
+  top: 12px;
+  z-index: var(--z-overlay);
+  width: 480px;
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius-3);
+  background: transparent;
+  animation: fade-in var(--dur-fast) var(--ease-smooth) both;
+}
+.snap-ghost.is-right {
+  right: 12px;
+}
+.snap-ghost.is-left {
+  left: 12px;
+}
+.portal-slot {
+  position: absolute;
+  right: 18px;
+  bottom: 14px;
+  z-index: var(--z-popover);
+}
+.scene-tabs {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: var(--z-popover);
+  transform: translateX(-50%);
+}
+.portal-slot {
+  width: 56px;
+  height: 56px;
+}
