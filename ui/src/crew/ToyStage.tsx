@@ -31,6 +31,9 @@ type Body = {
   angVel: number;
   phase: number;
   wanderAt: number;
+  hatched: boolean;
+  fromPortal: boolean;
+  walking: boolean;
 };
 
 type Props = {
@@ -235,11 +238,14 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         let b = bodies.current.get(t.key);
         if (!b) {
           const seed = ++seedN + t.key.length;
+          const fromPortal = !!t.spawn && t.state === "hatching";
+          const sx = fromPortal ? t.spawn!.x : t.x;
+          const sy = fromPortal ? t.spawn!.y : t.y;
           const rig = new ToyRig(t.id, t.hex, seed);
           sc.add(rig.parts.root);
           b = {
             rig,
-            pos: new THREE.Vector2(t.spawn?.x ?? t.x, t.spawn?.y ?? t.y),
+            pos: new THREE.Vector2(sx, sy),
             vel: new THREE.Vector2(),
             home: new THREE.Vector2(t.x, t.y),
             size: t.size ?? 64,
@@ -248,13 +254,16 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
             placed: false,
             anchor: null,
             seed,
-            prev: new THREE.Vector2(t.spawn?.x ?? t.x, t.spawn?.y ?? t.y),
+            prev: new THREE.Vector2(sx, sy),
             angle: 0,
             angVel: 0,
             phase: 0,
             wanderAt: now + 4000 + Math.random() * 6000,
+            hatched: t.state !== "hatching",
+            fromPortal,
+            walking: false,
           };
-          if (t.spawn && t.state === "hatching") {
+          if (fromPortal) {
             b.tossed = true;
             b.vel.set(-140 - Math.random() * 90, -460);
             b.angVel = -4 - Math.random() * 3;
@@ -268,10 +277,14 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         const isDrag = !!drag && drag.key === t.key && drag.moved;
         b.held = isDrag;
         let s: ToyState = t.state;
+        if (s === "hatching") {
+          if (b.hatched) s = "idle";
+          else if (b.rig.state === "hatching") b.hatched = true;
+        }
         if (isDrag) s = "held";
         else if (dropKey.current === t.key) s = "listening";
         else if (hoverKey.current === t.key && (t.state === "idle" || t.state === "sleeping")) s = "hover";
-        if (b.rig.state !== "hatching" || s === "returning") b.rig.setState(s);
+        if (b.rig.state !== "hatching" || s === "returning" || s === "held") b.rig.setState(s);
 
         let walk = 0;
         if (isDrag) {
@@ -313,7 +326,8 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
             if (Math.abs(b.vel.y) < 90) {
               b.tossed = false;
               b.vel.set(0, 0);
-              if (L.float && b.rig.state !== "hatching") {
+              if (b.fromPortal) b.fromPortal = false;
+              else if (L.float) {
                 b.home.set(b.pos.x, ground);
                 b.placed = true;
               }
@@ -352,10 +366,11 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
           }
         }
         b.prev.copy(b.pos);
+        b.walking = walk !== 0;
 
         const root = b.rig.parts.root;
         const c = b.size * b.rig.parts.height * 0.5;
-        root.position.set(b.pos.x + c * Math.sin(b.angle), -b.pos.y + c - c * Math.cos(b.angle), 0);
+        root.position.set(b.pos.x + c * Math.sin(b.angle), -b.pos.y + c - c * Math.cos(b.angle), b.walking ? -120 : 0);
         root.rotation.set(L.tilt, 0, b.angle);
         const headY = b.pos.y - b.size * b.rig.parts.height;
         const look = {
@@ -371,7 +386,7 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         const el = anchors.current.get(t.key);
         if (el) el.style.transform = `translate3d(${b.pos.x}px, ${headY}px, 0)`;
       }
-      const list = [...bodies.current.values()].filter((b) => !b.tossed && !b.held);
+      const list = [...bodies.current.values()].filter((b) => !b.tossed && !b.held && !b.walking);
       for (let i = 0; i < list.length; i++) {
         for (let j = i + 1; j < list.length; j++) {
           const a = list[i];
@@ -383,6 +398,8 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
             const sgn = d === 0 ? 1 : Math.sign(d);
             a.pos.x -= sgn * push;
             o.pos.x += sgn * push;
+            a.pos.x = THREE.MathUtils.clamp(a.pos.x, a.size * 0.6, W - a.size * 0.6);
+            o.pos.x = THREE.MathUtils.clamp(o.pos.x, o.size * 0.6, W - o.size * 0.6);
             if (a.placed) a.home.x = a.pos.x;
             if (o.placed) o.home.x = o.pos.x;
           }

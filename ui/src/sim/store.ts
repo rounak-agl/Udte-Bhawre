@@ -286,6 +286,9 @@ export const sim = {
     if (world.summoned.includes(id)) return;
     world = { ...world, summoned: [...world.summoned, id].slice(-4) };
     patch(id, { state: "hatching" });
+    setTimeout(() => {
+      if (world.crew[id].state === "hatching") patch(id, { state: "idle" });
+    }, 900);
   },
   dismiss(id: CrewId) {
     patch(id, { state: "returning" });
