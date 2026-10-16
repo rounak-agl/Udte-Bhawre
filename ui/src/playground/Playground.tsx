@@ -4,6 +4,7 @@ import "dialkit/styles.css";
 import { House, Monitor, Sparkles } from "lucide-react";
 import { Segmented } from "../components/ui";
 import { CREW, crewById, type CrewId } from "../crew/roster";
+import { isMini, parentOf, useMinis } from "../crew/minis";
 import { ToyStage, type StageToy } from "../crew/ToyStage";
 import { Desk, type DeskMode } from "../desk/Desk";
 import { Home } from "../home/Home";
@@ -59,6 +60,7 @@ export default function Playground() {
         zip: { type: "action", label: "Zip: launch posts" },
         penny: { type: "action", label: "Penny: expenses" },
         oops: { type: "action", label: "Bo: Gmail fails" },
+        helpers: { type: "action", label: "Zip: send out helpers" },
         sleep: { type: "action", label: "Everyone asleep" },
         reset: { type: "action", label: "Reset" },
       },
@@ -73,6 +75,15 @@ export default function Playground() {
         }
         if (k === "sleep") {
           world.summoned.forEach((id) => sim.setState(id, "sleeping"));
+          return;
+        }
+        if (k === "helpers") {
+          sim.summon("zip");
+          const titles = ["Competitor launches", "Pricing pages", "Launch week posts"];
+          const subs = titles.map((title, j) => ({ id: `h${j}`, title, status: "running" as const }));
+          setTimeout(() => sim.setSubs("zip", subs), 2400 / d.Stage.speed);
+          titles.forEach((_t, j) => setTimeout(() => sim.setSubs("zip", sim.snapshot().crew.zip.subs.map((x, n) => (n === j ? { ...x, status: "done" as const } : x))), (4600 + j * 1400) / d.Stage.speed));
+          setTimeout(() => sim.setSubs("zip", []), (4600 + titles.length * 1400 + 1200) / d.Stage.speed);
           return;
         }
         if (k === "oops") {
@@ -108,6 +119,7 @@ export default function Playground() {
       }),
     [world, area.w, area.h, d.Stage.size],
   );
+  const minis = useMinis(world, (_id, i) => ({ x: slotX(i), y: area.h - 12 }), portal, Math.round(d.Stage.size * 0.48));
 
   const summon = (id: CrewId) => {
     setOpening(id);
@@ -143,19 +155,20 @@ export default function Playground() {
         {scene !== "home" && (
           <>
             <ToyStage
-              toys={toys}
+              toys={[...toys, ...minis]}
               float
               intensity={d.Stage.breathing}
               reduced={d.Stage.reduced}
-              onToyClick={(k) => openCrew(k as CrewId)}
+              onToyClick={(k) => openCrew(parentOf(k))}
               onToyMove={(k, x, y) => pos.current.set(k, { x, y: y - d.Stage.size * 1.5 })}
               onToyDrop={(k, dt) => {
                 const files = [...dt.files].map((f) => ({ name: f.name, size: `${Math.max(1, Math.round(f.size / 1000))} KB` }));
-                const id = k as CrewId;
+                const id = parentOf(k);
                 sim.send(id, dt.getData("text/plain") || undefined, files.length ? files : undefined);
                 openCrew(id);
               }}
               overlay={(t) => {
+                if (isMini(t.key)) return null;
                 const id = t.key as CrewId;
                 const live = world.crew[id];
                 return <ToyOverlay crew={crewById(id)} state={live.state} peek={open === id ? null : live.peek} onOpen={() => openCrew(id)} onDismissPeek={() => sim.dismissPeek(id)} />;

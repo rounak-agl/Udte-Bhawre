@@ -313,6 +313,9 @@ export const sim = {
   setState(id: CrewId, state: ToyState) {
     patch(id, { state });
   },
+  setSubs(id: CrewId, subs: Sub[]) {
+    patch(id, { subs });
+  },
   dismissPeek(id: CrewId) {
     patch(id, { peek: null });
   },
