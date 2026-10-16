@@ -15,6 +15,11 @@ export function useStageSync() {
       });
     };
     const off = sim.subscribe(push);
+    const live = new URLSearchParams(location.search).get("sim") !== "1";
+    sim.setLive(live);
+    const refresh = () => bridge!.overview().then((o) => sim.setBrains(o));
+    void refresh();
+    const offBackend = bridge.onBackend((e) => sim.backend(e));
     const offBus = bridge.on((m: BusMsg) => {
       if (m.type === "hello") push();
       if (m.type !== "action") return;
@@ -23,10 +28,14 @@ export function useStageSync() {
       else if (m.name === "summon") sim.summon(m.id);
       else if (m.name === "retry") sim.send(m.id);
       else if (m.name === "wake") sim.dismissPeek(m.id);
+      else if (m.name === "stop") sim.stop(m.id);
+      else if (m.name === "refresh") void refresh();
+      else if (m.name === "brain") void bridge!.setProvider(m.id, m.key).then(refresh);
     });
     return () => {
       off();
       offBus();
+      offBackend();
     };
   }, []);
 }

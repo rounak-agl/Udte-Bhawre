@@ -1,5 +1,7 @@
 import type { CrewId, ToyState } from "../crew/roster";
 
+export type Attachment = { name: string; size: string; image?: { mimeType: string; data: string }; text?: string };
+
 export type Risk = "read" | "write" | "send" | "delete" | "pay" | "post";
 
 export type ToolItem = { id: string; verb: string; target: string; ms?: number; status: "running" | "done" | "failed"; detail?: string };

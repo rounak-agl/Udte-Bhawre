@@ -17,5 +17,18 @@ contextBridge.exposeInMainWorld('crewBridge', {
   deskMode: (mode) => ipcRenderer.send('crew:desk-mode', mode),
   closeDesk: () => ipcRenderer.send('crew:desk-close'),
   pinDesk: (on) => ipcRenderer.send('crew:desk-pin', !!on),
-  openHome: () => ipcRenderer.send('crew:open-home')
+  openHome: () => ipcRenderer.send('crew:open-home'),
+  chatSend: (id, text, images) => ipcRenderer.send('crew:chat-send', id, text, images),
+  decide: (planId, ok) => ipcRenderer.send('crew:decide', planId, !!ok),
+  stop: (id) => ipcRenderer.send('crew:stop', id),
+  overview: () => ipcRenderer.invoke('crew:overview'),
+  setProvider: (id, key) => ipcRenderer.invoke('crew:set-provider', id, key),
+  localDetect: () => ipcRenderer.invoke('crew:local-detect'),
+  localAdd: (model) => ipcRenderer.invoke('crew:local-add', model),
+  setKey: (key) => ipcRenderer.invoke('crew:set-key', key),
+  onBackend: (fn) => {
+    const handler = (_e, evt) => fn(evt);
+    ipcRenderer.on('crew:backend', handler);
+    return () => ipcRenderer.removeListener('crew:backend', handler);
+  }
 });

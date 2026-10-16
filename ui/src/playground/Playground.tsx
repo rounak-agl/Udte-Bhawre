@@ -214,6 +214,7 @@ export default function Playground() {
                         setOpen(id);
                       }}
                       onRetry={() => sim.send(open)}
+                      onStop={() => sim.stop(open)}
                       onDragStart={startDrag}
                     />
                   )

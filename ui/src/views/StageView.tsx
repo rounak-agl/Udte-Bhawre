@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { crewById, type CrewId } from "../crew/roster";
 import { ToyStage, type StageToy } from "../crew/ToyStage";
 import { bridge } from "../lib/bridge";
+import { readAttachment } from "../desk/Desk";
 import { sim, useWorld } from "../sim/store";
 import { Portal } from "../stage/Portal";
 import { ToyOverlay } from "../stage/ToyOverlay";
@@ -67,8 +68,9 @@ export default function StageView() {
         }}
         onToyClick={(k) => open(k as CrewId)}
         onToyDrop={(k, dt) => {
-          const files = [...dt.files].map((f) => ({ name: f.name, size: `${Math.max(1, Math.round(f.size / 1000))} KB` }));
-          sim.send(k as CrewId, dt.getData("text/plain") || undefined, files.length ? files : undefined);
+          const list = [...dt.files];
+          const text = dt.getData("text/plain") || undefined;
+          void Promise.all(list.slice(0, 4).map(readAttachment)).then((files) => sim.send(k as CrewId, text, files.length ? files : undefined));
           open(k as CrewId);
         }}
         overlay={(t) => {
@@ -81,10 +83,13 @@ export default function StageView() {
         <Portal
           summoned={world.summoned}
           opening={opening}
+          lonely={world.needsSetup && world.summoned.length === 0}
+          hint={world.needsSetup && world.summoned.length === 0 ? "Something's in here." : null}
           onSummon={(id) => {
             setOpening(id);
             setTimeout(() => setOpening(null), 1200);
             sim.summon(id);
+            if (world.needsSetup) setTimeout(() => bridge?.openDesk(id, anchorOf(id)), 1100);
           }}
           onDismiss={(id) => sim.dismiss(id)}
         />

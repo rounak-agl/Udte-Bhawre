@@ -1,6 +1,7 @@
 const path = require('path');
-const { BrowserWindow, ipcMain, screen, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, nativeTheme } = require('electron');
 const { ROOT } = require('./paths');
+const backend = require('./crew-backend');
 
 const PRELOAD = path.join(ROOT, 'preload-crew.js');
 const DEV_URL = process.env.CREW_UI_DEV || '';
@@ -174,10 +175,27 @@ function registerCrewIpc() {
     if (windows.desk && !windows.desk.isDestroyed()) windows.desk.setAlwaysOnTop(!!on, 'floating');
   });
   ipcMain.on('crew:open-home', () => openHome());
+  ipcMain.on('crew:chat-send', (_e, id, text, images) => backend.send(id, text, images));
+  ipcMain.on('crew:decide', (_e, planId, ok) => backend.decide(planId, ok));
+  ipcMain.on('crew:stop', (_e, id) => backend.stop(id));
+  ipcMain.handle('crew:overview', () => backend.overview());
+  ipcMain.handle('crew:set-provider', (_e, id, key) => backend.setProvider(id, key));
+  ipcMain.handle('crew:local-detect', () => backend.detectLocal());
+  ipcMain.handle('crew:local-add', (_e, model) => backend.addLocal(model));
+  ipcMain.handle('crew:set-key', (event, key) => {
+    const trusted = [windows.home, windows.desk].some((w) => w && !w.isDestroyed() && w.webContents === event.sender);
+    if (!trusted) return { ok: false, error: 'Not allowed from this window' };
+    return backend.setGeminiKey(key);
+  });
   ipcMain.handle('crew:desk-crew', () => deskCrew);
 }
 
 function startCrewUI() {
+  backend.setSink((evt) => {
+    if (windows.stage && !windows.stage.isDestroyed()) windows.stage.webContents.send('crew:backend', evt);
+  });
+  app.on('before-quit', () => backend.shutdown());
+  console.log('[crew] brains', JSON.stringify(backend.overview().assigned));
   createStage();
   screen.on('display-metrics-changed', () => {
     if (!windows.stage || windows.stage.isDestroyed()) return;
@@ -186,4 +204,14 @@ function startCrewUI() {
   });
 }
 
-module.exports = { registerCrewIpc, startCrewUI, openHome };
+function trayTemplate() {
+  return [
+    { label: 'Open Home base', click: () => openHome() },
+    { label: 'Show the crew', click: () => windows.stage && !windows.stage.isDestroyed() && windows.stage.showInactive() },
+    { label: 'Hide the crew', click: () => windows.stage && !windows.stage.isDestroyed() && windows.stage.hide() },
+    { type: 'separator' },
+    { label: 'Quit', click: () => app.quit() }
+  ];
+}
+
+module.exports = { registerCrewIpc, startCrewUI, openHome, trayTemplate };

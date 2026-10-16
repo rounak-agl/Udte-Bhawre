@@ -1,7 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { CREW, type CrewId, type ToyState } from "../crew/roster";
 import { OOPS_SCRIPT, SCRIPTS } from "./scripts";
-import type { Msg, Script } from "./types";
+import type { Attachment, Msg, Script } from "./types";
+import { bridge } from "../lib/bridge";
 
 export type CrewLive = {
   state: ToyState;
@@ -12,10 +13,17 @@ export type CrewLive = {
   queued: string[];
 };
 
+export type Brain = { key: string; name: string; kind: "local" | "cloud"; supportsImages?: boolean };
+
 type World = {
   crew: Record<CrewId, CrewLive>;
   summoned: CrewId[];
   speed: number;
+  live: boolean;
+  brains: Partial<Record<CrewId, Brain | null>>;
+  providers: Brain[];
+  hasGeminiKey: boolean;
+  needsSetup: boolean;
 };
 
 const blank = (): CrewLive => ({ state: "idle", msgs: [], peek: null, busy: false, waiting: false, queued: [] });
@@ -24,6 +32,11 @@ let world: World = {
   crew: Object.fromEntries(CREW.map((c) => [c.id, blank()])) as Record<CrewId, CrewLive>,
   summoned: ["bo", "pim", "penny"],
   speed: 1,
+  live: false,
+  brains: {},
+  providers: [],
+  hasGeminiKey: false,
+  needsSetup: false,
 };
 
 const subs = new Set<() => void>();
@@ -109,8 +122,139 @@ async function run(id: CrewId, script: Script, text: string, files?: { name: str
   if (world.crew[id].state === "done") patch(id, { state: "idle" });
 }
 
+function lastMsg(id: CrewId) {
+  const m = world.crew[id].msgs;
+  return m[m.length - 1];
+}
+
+function closeStream(id: CrewId) {
+  const l = lastMsg(id);
+  if (l && l.kind === "text" && l.streaming) edit(id, l.id, (m) => (m.kind === "text" ? { ...m, streaming: false } : m));
+}
+
+function summarise(input: unknown): string {
+  if (input == null) return "";
+  if (typeof input === "string") return input.slice(0, 80);
+  if (typeof input === "object") {
+    const o = input as Record<string, unknown>;
+    const v = o.path ?? o.query ?? o.url ?? o.file ?? o.command ?? o.to ?? o.subject ?? Object.values(o)[0];
+    return typeof v === "string" ? v.slice(0, 80) : JSON.stringify(v ?? "").slice(0, 80);
+  }
+  return String(input).slice(0, 80);
+}
+
+function verbOf(name: string) {
+  const n = name.replace(/^mcp__[^_]+__/, "").replace(/[_-]+/g, " ").trim();
+  return n.charAt(0).toUpperCase() + n.slice(1);
+}
+
+const turnFailed = new Set<CrewId>();
+
+function liveSend(id: CrewId, text: string, files?: Attachment[]) {
+  const images = (files ?? []).filter((f) => f.image).map((f) => f.image!);
+  const texts = (files ?? []).filter((f) => f.text != null);
+  const body = [text, ...texts.map((f) => `Attached file ${f.name}:\n\`\`\`\n${f.text}\n\`\`\``)].filter(Boolean).join("\n\n");
+  turnFailed.delete(id);
+  patch(id, { busy: true, peek: null, state: "listening" });
+  push(id, { kind: "user", id: uid(), text: text || (files?.length ? "Take a look at this" : ""), files: files?.map((f) => ({ name: f.name, size: f.size })) });
+  bridge?.chatSend(id, body || "Take a look at this", images);
+}
+
+function onBackend(id: CrewId, channel: string, args: unknown[]) {
+  if (!world.crew[id]) return;
+  switch (channel) {
+    case "crew-thinking":
+      patch(id, { state: "thinking", busy: true });
+      break;
+    case "chat-text": {
+      const chunk = String(args[0] ?? "");
+      const l = lastMsg(id);
+      if (l && l.kind === "text" && l.streaming) edit(id, l.id, (m) => (m.kind === "text" ? { ...m, text: m.text + chunk } : m));
+      else push(id, { kind: "text", id: uid(), text: chunk, streaming: true });
+      if (world.crew[id].state !== "working") patch(id, { state: "working" });
+      break;
+    }
+    case "chat-tool-use": {
+      closeStream(id);
+      const item = { id: uid(), verb: verbOf(String(args[0] ?? "Tool")), target: summarise(args[1]), status: "running" as const };
+      const l = lastMsg(id);
+      if (l && l.kind === "tools") edit(id, l.id, (m) => (m.kind === "tools" ? { ...m, items: [...m.items, item] } : m));
+      else push(id, { kind: "tools", id: uid(), items: [item] });
+      patch(id, { state: "working" });
+      break;
+    }
+    case "chat-tool-result": {
+      const failed = !!args[1];
+      const msgs = world.crew[id].msgs;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (m.kind !== "tools") continue;
+        const idx = m.items.findIndex((x) => x.status === "running");
+        if (idx < 0) break;
+        edit(id, m.id, (mm) => (mm.kind === "tools" ? { ...mm, items: mm.items.map((x, j) => (j === idx ? { ...x, status: failed ? "failed" : "done", detail: String(args[0] ?? "") } : x)) } : mm));
+        break;
+      }
+      break;
+    }
+    case "crew-approval": {
+      closeStream(id);
+      const a = (args[0] ?? {}) as { planId: string; message: string };
+      push(id, { kind: "plan", id: a.planId, summary: a.message, steps: [], status: "pending" });
+      patch(id, { state: "needs-you", waiting: true, peek: "Needs your OK to continue." });
+      break;
+    }
+    case "chat-error":
+      closeStream(id);
+      turnFailed.add(id);
+      push(id, { kind: "error", id: uid(), title: "That didn't work", body: String(args[0] ?? "Something went wrong. Nothing was changed.") });
+      break;
+    case "chat-turn-complete": {
+      closeStream(id);
+      const failed = turnFailed.has(id);
+      const texts = world.crew[id].msgs.filter((m) => m.kind === "text");
+      const lastText = texts[texts.length - 1];
+      const line = lastText && lastText.kind === "text" ? lastText.text.replace(/```[\s\S]*?```/g, "").trim().split(/(?<=[.!?])\s/)[0]?.slice(0, 110) : "";
+      patch(id, { busy: false, waiting: false, state: failed ? "oops" : "done", peek: failed ? "Couldn't finish. Open to see why." : line || "Done." });
+      setTimeout(() => {
+        const st = world.crew[id].state;
+        if (st === "done" || st === "oops") patch(id, { state: "idle" });
+      }, failed ? 6000 : 2600);
+      break;
+    }
+    case "security-audit-event": {
+      const e = (args[0] ?? {}) as { type?: string; data?: { reason?: string; tool?: string } };
+      if (e.type && /block/i.test(e.type)) push(id, { kind: "error", id: uid(), title: "Blocked by your safety rules", body: e.data?.reason ?? `${e.data?.tool ?? "A step"} was stopped before it ran.` });
+      break;
+    }
+  }
+}
+
 export const sim = {
-  send(id: CrewId, text?: string, files?: { name: string; size: string }[]) {
+  setLive(on: boolean) {
+    world = { ...world, live: on };
+    emit();
+  },
+  backend(evt: { id: CrewId; channel: string; args: unknown[] }) {
+    onBackend(evt.id, evt.channel, evt.args);
+  },
+  setBrains(o: { providers: Brain[]; assigned: Partial<Record<CrewId, Brain | null>>; hasGeminiKey: boolean }) {
+    const needsSetup = !o.hasGeminiKey && !o.providers.some((p) => p.kind === "local");
+    world = { ...world, providers: o.providers, brains: o.assigned, hasGeminiKey: o.hasGeminiKey, needsSetup, summoned: needsSetup && !world.needsSetup ? [] : world.summoned };
+    emit();
+  },
+  stop(id: CrewId) {
+    if (world.live) bridge?.stop(id);
+    patch(id, { busy: false, waiting: false, state: "idle" });
+  },
+  send(id: CrewId, text?: string, files?: Attachment[]) {
+    if (world.live) {
+      if (world.crew[id].busy) {
+        patch(id, (c) => ({ queued: [...c.queued, text ?? ""] }));
+        return;
+      }
+      liveSend(id, text?.trim() ?? "", files);
+      return;
+    }
     const c = world.crew[id];
     if (c.busy) {
       patch(id, { queued: [...c.queued, text ?? ""] });
@@ -123,6 +267,12 @@ export const sim = {
     void run(id, { ...OOPS_SCRIPT, crew: id }, OOPS_SCRIPT.prompt);
   },
   decide(id: CrewId, planId: string, ok: boolean) {
+    if (world.live) {
+      bridge?.decide(planId, ok);
+      edit(id, planId, (m) => (m.kind === "plan" ? { ...m, status: ok ? "approved" : "denied" } : m));
+      patch(id, { waiting: false, peek: null, state: ok ? "working" : "idle" });
+      return;
+    }
     approvals.get(planId)?.(ok);
     if (!approvals.has(planId)) patch(id, { waiting: false });
   },

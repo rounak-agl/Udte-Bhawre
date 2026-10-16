@@ -3,7 +3,8 @@ import { ArrowUp, Cloud, HardDrive, Maximize2, Mic, Minimize2, PanelRight, Paper
 import { CellLoader, Chip, IconButton, Kbd, Status, type StatusTone } from "../components/ui";
 import { CREW, crewById, type CrewId, type ToyState } from "../crew/roster";
 import { CrewFace } from "../crew/CrewFace";
-import type { CrewLive } from "../sim/store";
+import type { Brain, CrewLive } from "../sim/store";
+import type { Attachment } from "../sim/types";
 import { SEED_THREADS } from "../sim/scripts";
 import { Thread } from "./Thread";
 import "./desk.css";
@@ -27,7 +28,11 @@ type Props = {
   pinned?: boolean;
   onMode: (m: DeskMode) => void;
   onClose: () => void;
-  onSend: (text: string, files?: { name: string; size: string }[]) => void;
+  onSend: (text: string, files?: Attachment[]) => void;
+  onStop?: () => void;
+  brain?: Brain | null;
+  brains?: Brain[];
+  onBrain?: (key: string) => void;
   onDecide: (planId: string, ok: boolean) => void;
   onPickCrew?: (id: CrewId) => void;
   onPin?: () => void;
@@ -36,16 +41,42 @@ type Props = {
   native?: boolean;
 };
 
+const TEXT_EXT = /\.(txt|md|csv|tsv|json|html?|xml|ya?ml|log|js|ts|py|ini|eml)$/i;
+
+export function readAttachment(f: File): Promise<Attachment> {
+  const base = { name: f.name, size: fmtSize(f.size) };
+  return new Promise((resolve) => {
+    const r = new FileReader();
+    if (/^image\/(png|jpeg|webp|gif)$/.test(f.type) && f.size < 8e6) {
+      r.onload = () => resolve({ ...base, image: { mimeType: f.type, data: String(r.result).split(",")[1] ?? "" } });
+      r.onerror = () => resolve(base);
+      r.readAsDataURL(f);
+    } else if ((f.type.startsWith("text/") || TEXT_EXT.test(f.name)) && f.size < 200e3) {
+      r.onload = () => resolve({ ...base, text: String(r.result) });
+      r.onerror = () => resolve(base);
+      r.readAsText(f);
+    } else resolve(base);
+  });
+}
+
 function fmtSize(n: number) {
   return n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`;
 }
 
-export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDecide, onPickCrew, onPin, onRetry, onDragStart, native }: Props) {
+export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDecide, onPickCrew, onPin, onRetry, onDragStart, native, onStop, brain, brains, onBrain }: Props) {
   const crew = crewById(crewId);
   const [text, setText] = useState("");
-  const [files, setFiles] = useState<{ name: string; size: string }[]>([]);
+  const [files, setFiles] = useState<Attachment[]>([]);
   const [over, setOver] = useState(false);
+  const [menu, setMenu] = useState(false);
   const ta = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const model = brain ?? { key: "", name: crew.model.name, kind: crew.model.kind };
+
+  const addFiles = async (list: File[]) => {
+    const read = await Promise.all(list.slice(0, 4).map(readAttachment));
+    setFiles((x) => [...x, ...read].slice(0, 4));
+  };
   const line = STATE_LINE[live.state];
   const empty = live.msgs.length === 0;
 
@@ -60,9 +91,9 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
     setOver(false);
-    const fs = [...e.dataTransfer.files].map((f) => ({ name: f.name, size: fmtSize(f.size) }));
+    const list = [...e.dataTransfer.files];
     const txt = e.dataTransfer.getData("text/plain");
-    if (fs.length) setFiles((x) => [...x, ...fs].slice(0, 4));
+    if (list.length) void addFiles(list);
     else if (txt) setText((v) => (v ? `${v}\n${txt}` : txt));
   };
 
@@ -160,7 +191,7 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
           <div className="busy-line">
             <CellLoader size={3} color={crew.color} />
             <span>{live.queued.length ? `${live.queued.length} queued. ${crew.name} gets to it next.` : `${crew.name} is on it. You can keep typing.`}</span>
-            <button type="button" className="link-btn">
+            <button type="button" className="link-btn" onClick={onStop}>
               <Square />
               Stop
             </button>
@@ -198,9 +229,19 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
             }}
           />
           <div className="composer__row">
-            <IconButton label="Attach a file">
+            <IconButton label="Attach a file" onClick={() => picker.current?.click()}>
               <Paperclip />
             </IconButton>
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                void addFiles([...(e.target.files ?? [])]);
+                e.target.value = "";
+              }}
+            />
             <IconButton label="Capture screen">
               <ScanLine />
             </IconButton>
@@ -208,9 +249,40 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
               <Mic />
             </IconButton>
             <span className="grow" />
-            <span className={`model model--${crew.model.kind}`} data-tip={crew.model.kind === "local" ? "Runs fully on this computer" : "Uses your own key"}>
-              {crew.model.kind === "local" ? <HardDrive /> : <Cloud />}
-              {crew.model.kind === "local" ? "On this computer" : crew.model.name}
+            <span className="model-wrap">
+              <button type="button" className={`model model--${model.kind}`} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu((v) => !v)} disabled={!brains?.length}>
+                {model.kind === "local" ? <HardDrive /> : <Cloud />}
+                {model.kind === "local" ? `${model.name} · on this computer` : model.name}
+              </button>
+              {menu && brains && (
+                <span className="menu" role="menu">
+                  {(["local", "cloud"] as const).map((k) => {
+                    const group = brains.filter((b) => b.kind === k);
+                    if (!group.length) return null;
+                    return (
+                      <span key={k} className="menu__group">
+                        <span className="menu__label eyebrow">{k === "local" ? "On this computer" : "Cloud"}</span>
+                        {group.map((b) => (
+                          <button
+                            key={b.key}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={b.key === model.key}
+                            className="menu__item"
+                            onClick={() => {
+                              onBrain?.(b.key);
+                              setMenu(false);
+                            }}
+                          >
+                            {k === "local" ? <HardDrive /> : <Cloud />}
+                            {b.name}
+                          </button>
+                        ))}
+                      </span>
+                    );
+                  })}
+                </span>
+              )}
             </span>
             <button type="button" className="send" aria-label="Send" disabled={!text.trim() && !files.length} onClick={() => submit()}>
               <ArrowUp />
