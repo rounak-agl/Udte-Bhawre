@@ -1,5 +1,5 @@
 import type { CrewId } from "../crew/roster";
-import type { Script, Thread } from "./types";
+import type { Script } from "./types";
 
 export const SCRIPTS: Record<CrewId, Script> = {
   bo: {
@@ -192,13 +192,3 @@ export const OOPS_SCRIPT: Script = {
     { peek: "Couldn't reach Gmail. Reconnect to continue." },
   ],
 };
-
-export const SEED_THREADS: Thread[] = [
-  { id: "t1", crew: "bo", title: "Replies for today", updated: "9:12", msgs: [] },
-  { id: "t2", crew: "penny", title: "September expenses", updated: "Yesterday", msgs: [] },
-  { id: "t3", crew: "zip", title: "Launch week posts", updated: "Yesterday", msgs: [] },
-  { id: "t4", crew: "tuck", title: "Downloads cleanup", updated: "Mon", msgs: [] },
-  { id: "t5", crew: "pim", title: "Launch note, warmer", updated: "Mon", msgs: [] },
-  { id: "t6", crew: "penny", title: "Invoice for Acme", updated: "12 Oct", msgs: [] },
-  { id: "t7", crew: "bo", title: "Move the landlord visit", updated: "11 Oct", msgs: [] },
-];

@@ -188,6 +188,7 @@ function registerCrewIpc() {
     return backend.setGeminiKey(key);
   });
   ipcMain.handle('crew:desk-crew', () => deskCrew);
+  ipcMain.on('crew:open-connectors', () => require('./control-centre').openControlCentre('connectors'));
 }
 
 function startCrewUI() {

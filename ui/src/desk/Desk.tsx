@@ -1,11 +1,12 @@
 import { useRef, useState, type CSSProperties, type DragEvent } from "react";
 import { ArrowUp, Cloud, HardDrive, Maximize2, Mic, Minimize2, PanelRight, Paperclip, Pin, ScanLine, Search, Square, X } from "lucide-react";
-import { CellLoader, Chip, IconButton, Kbd, Status, type StatusTone } from "../components/ui";
+import { CellLoader, Chip, IconButton, Status, type StatusTone } from "../components/ui";
 import { CREW, crewById, type CrewId, type ToyState } from "../crew/roster";
 import { CrewFace } from "../crew/CrewFace";
 import type { Brain, CrewLive } from "../sim/store";
+import type { Msg } from "../sim/types";
 import type { Attachment } from "../sim/types";
-import { SEED_THREADS } from "../sim/scripts";
+import { useWorld } from "../sim/store";
 import { Thread } from "./Thread";
 import "./desk.css";
 
@@ -310,34 +311,65 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
           </button>
         ))}
       </nav>
-      <aside className="threads">
-        <div className="threads__search">
-          <Search />
-          <input placeholder="Search threads" />
-          <Kbd>Ctrl K</Kbd>
-        </div>
-        <div className="threads__filters">
-          <Chip selected>All</Chip>
-          <Chip color={crew.color} dot>
-            {crew.name}
-          </Chip>
-        </div>
-        <ul className="threads__list">
-          {SEED_THREADS.map((t, i) => {
-            const c = crewById(t.crew);
-            return (
-              <li key={t.id}>
-                <button type="button" className={`thr ${i === 0 && t.crew === crewId ? "is-on" : ""}`} onClick={() => onPickCrew?.(t.crew)}>
-                  <CrewFace id={c.id} color={c.color} size={22} />
-                  <span className="thr__title">{t.title}</span>
-                  <span className="thr__time eyebrow">{t.updated}</span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      </aside>
+      <ThreadList crewId={crewId} onPickCrew={onPickCrew} />
       {main}
     </div>
+  );
+}
+
+function firstAsk(msgs: Msg[]) {
+  const u = msgs.find((m) => m.kind === "user");
+  return u && u.kind === "user" ? u.text : "";
+}
+
+function stamp(t: number) {
+  if (!t) return "";
+  const d = new Date(t);
+  return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : d.toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+function ThreadList({ crewId, onPickCrew }: { crewId: CrewId; onPickCrew?: (id: CrewId) => void }) {
+  const world = useWorld();
+  const [q, setQ] = useState("");
+  const [mine, setMine] = useState(false);
+  const crew = crewById(crewId);
+  const needle = q.trim().toLowerCase();
+  const list = CREW.filter((c) => {
+    const msgs = world.crew[c.id].msgs;
+    if (!msgs.some((m) => m.kind === "user")) return false;
+    if (mine && c.id !== crewId) return false;
+    if (!needle) return true;
+    return msgs.some((m) => (m.kind === "user" || m.kind === "text") && m.text.toLowerCase().includes(needle));
+  }).sort((x, y) => world.crew[y.id].updated - world.crew[x.id].updated);
+  return (
+    <aside className="threads">
+      <div className="threads__search">
+        <Search />
+        <input placeholder="Search threads" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div className="threads__filters">
+        <Chip selected={!mine} onClick={() => setMine(false)}>
+          All
+        </Chip>
+        <Chip color={crew.color} dot selected={mine} onClick={() => setMine(true)}>
+          {crew.name}
+        </Chip>
+      </div>
+      {list.length === 0 ? (
+        <p className="threads__empty eyebrow">{needle ? "No thread mentions that." : "No threads yet."}</p>
+      ) : (
+        <ul className="threads__list">
+          {list.map((c) => (
+            <li key={c.id}>
+              <button type="button" className={`thr ${c.id === crewId ? "is-on" : ""}`} onClick={() => onPickCrew?.(c.id)}>
+                <CrewFace id={c.id} color={c.color} size={22} />
+                <span className="thr__title">{firstAsk(world.crew[c.id].msgs) || c.name}</span>
+                <span className="thr__time eyebrow">{stamp(world.crew[c.id].updated)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </aside>
   );
 }

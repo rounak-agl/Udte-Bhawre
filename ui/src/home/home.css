@@ -703,3 +703,23 @@
   z-index: var(--z-sticky);
   -webkit-app-region: drag;
 }
+
+.empty-note {
+  margin: 0;
+  padding: var(--space-4) 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-wrap: pretty;
+}
+.set__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+.set__row .field__hint {
+  margin: 0;
+}
+.rows--big .row > .eyebrow {
+  white-space: nowrap;
+}

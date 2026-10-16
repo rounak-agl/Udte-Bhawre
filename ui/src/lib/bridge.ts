@@ -1,6 +1,7 @@
 import type { CrewId } from "../crew/roster";
 import type { DeskMode } from "../desk/Desk";
 import type { Attachment } from "../sim/types";
+import type { Overview } from "../sim/store";
 
 export type BusMsg =
   | { type: "hello" }
@@ -9,7 +10,7 @@ export type BusMsg =
   | { type: "action"; name: "stop"; id: CrewId }
   | { type: "action"; name: "brain"; id: CrewId; key: string }
   | { type: "action"; name: "decide"; id: CrewId; planId: string; ok: boolean }
-  | { type: "action"; name: "summon" | "wake" | "retry" | "refresh"; id: CrewId };
+  | { type: "action"; name: "summon" | "wake" | "retry" | "refresh" | "clear"; id: CrewId };
 
 export type LocalStatus = { running: boolean; error?: string; models: { name: string; size: number }[]; added: { id: string; model: string; name: string }[] };
 
@@ -26,11 +27,12 @@ type Bridge = {
   chatSend: (id: CrewId, text: string, images: { mimeType: string; data: string }[]) => void;
   decide: (planId: string, ok: boolean) => void;
   stop: (id: CrewId) => void;
-  overview: () => Promise<{ providers: { key: string; name: string; kind: "local" | "cloud"; supportsImages?: boolean }[]; assigned: Partial<Record<CrewId, { key: string; name: string; kind: "local" | "cloud" } | null>>; hasGeminiKey: boolean }>;
+  overview: () => Promise<Overview>;
   setProvider: (id: CrewId, key: string) => Promise<boolean>;
   localDetect: () => Promise<LocalStatus>;
   localAdd: (model: string) => Promise<{ ok: boolean; key?: string; error?: string }>;
   setKey: (key: string) => Promise<{ ok: boolean; error?: string }>;
+  openConnectors: () => void;
   onBackend: (fn: (e: { id: CrewId; channel: string; args: unknown[] }) => void) => () => void;
 };
 

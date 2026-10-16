@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('crewBridge', {
   localDetect: () => ipcRenderer.invoke('crew:local-detect'),
   localAdd: (model) => ipcRenderer.invoke('crew:local-add', model),
   setKey: (key) => ipcRenderer.invoke('crew:set-key', key),
+  openConnectors: () => ipcRenderer.send('crew:open-connectors'),
   onBackend: (fn) => {
     const handler = (_e, evt) => fn(evt);
     ipcRenderer.on('crew:backend', handler);

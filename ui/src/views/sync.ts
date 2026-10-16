@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { bridge, type BusMsg } from "../lib/bridge";
 import { sim, type World } from "../sim/store";
+import { keepHistory, loadHistory } from "../sim/history";
 
 export function useStageSync() {
   useEffect(() => {
@@ -17,6 +18,8 @@ export function useStageSync() {
     const off = sim.subscribe(push);
     const live = new URLSearchParams(location.search).get("sim") !== "1";
     sim.setLive(live);
+    if (live) loadHistory();
+    const offHistory = live ? keepHistory() : () => {};
     const refresh = () => bridge!.overview().then((o) => sim.setBrains(o));
     void refresh();
     const offBackend = bridge.onBackend((e) => sim.backend(e));
@@ -30,10 +33,12 @@ export function useStageSync() {
       else if (m.name === "wake") sim.dismissPeek(m.id);
       else if (m.name === "stop") sim.stop(m.id);
       else if (m.name === "refresh") void refresh();
+      else if (m.name === "clear") sim.reset();
       else if (m.name === "brain") void bridge!.setProvider(m.id, m.key).then(refresh);
     });
     return () => {
       off();
+      offHistory();
       offBus();
       offBackend();
     };

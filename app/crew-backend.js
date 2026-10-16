@@ -4,7 +4,8 @@ const { app } = require('electron');
 const { Character } = require('./character');
 const { approveToolCall } = require('./security');
 const { listProviders, isKnownProvider, getProviderInfo, addCustomModel } = require('../sessions/providers');
-const { getApiKey, getCustomModels, setApiKey } = require('../sessions/agent-session');
+const { getApiKey, getCustomModels, setApiKey, getMcpServers } = require('../sessions/agent-session');
+const { getCatalogEntry } = require('../mcp-servers/catalog');
 const { listOllamaModels } = require('../sessions/ollama-session');
 
 const CREW = {
@@ -19,6 +20,18 @@ const PROMPTS = path.join(__dirname, 'crew-prompts');
 const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
 const IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+const CURATED = [
+  ['filesystem', ['tuck']],
+  ['notion', ['zip']],
+  ['slack', ['bo', 'zip']],
+  ['todoist', ['bo']],
+  ['hubspot', ['zip']],
+  ['airtable', ['penny']],
+  ['stripe', ['penny']],
+  ['exa', ['zip', 'penny']],
+  ['fetch', ['zip']]
+];
 
 const chars = new Map();
 const approvals = new Map();
@@ -166,13 +179,22 @@ function describe(key) {
   return info ? { key: info.key, name: info.name, kind: info.kind === 'ollama' ? 'local' : 'cloud', supportsImages: info.supportsImages } : null;
 }
 
+function connectors() {
+  const installed = getMcpServers() || {};
+  return CURATED.map(([id, who]) => {
+    const entry = getCatalogEntry(id);
+    return entry ? { id, name: entry.name, description: entry.description, category: entry.category, who, on: !!installed[id] } : null;
+  }).filter(Boolean);
+}
+
 function overview() {
   const assigned = {};
   for (const id of Object.keys(CREW)) assigned[id] = describe(providerOf(id));
   return {
     providers: listProviders().map((p) => ({ key: p.key, name: p.name, kind: p.kind === 'ollama' ? 'local' : 'cloud', supportsImages: p.supportsImages, model: p.model })),
     assigned,
-    hasGeminiKey: !!getApiKey()
+    hasGeminiKey: !!getApiKey(),
+    connectors: connectors()
   };
 }
 
