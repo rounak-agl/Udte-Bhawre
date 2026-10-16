@@ -4,6 +4,7 @@ import { Button, CellLoader } from "../components/ui";
 import type { Crew } from "../crew/roster";
 import type { Msg, Risk } from "../sim/types";
 import { Card } from "./cards";
+import { Rich } from "./Rich";
 
 const RISK: Record<Risk, { label: string; strong: boolean }> = {
   read: { label: "Reads", strong: false },
@@ -26,7 +27,7 @@ function Plan({ m, crew, onDecide }: { m: Extract<Msg, { kind: "plan" }>; crew: 
       <div className={`plan-done ${m.status}`}>
         <ShieldCheck />
         <span>{m.status === "approved" ? "You approved this plan" : "You stopped this plan"}</span>
-        <span className="eyebrow">{m.steps.length} steps</span>
+        {m.steps.length > 0 && <span className="eyebrow">{m.steps.length} steps</span>}
       </div>
     );
   }
@@ -39,6 +40,7 @@ function Plan({ m, crew, onDecide }: { m: Extract<Msg, { kind: "plan" }>; crew: 
         {crew.name} needs your OK
       </span>
       <p className="plan__summary">{m.summary}</p>
+      {m.steps.length > 0 && (
       <ol className="plan__steps">
         {m.steps.map((s, i) => (
           <li key={i}>
@@ -48,10 +50,11 @@ function Plan({ m, crew, onDecide }: { m: Extract<Msg, { kind: "plan" }>; crew: 
           </li>
         ))}
       </ol>
+      )}
       {details && (
         <dl className="plan__details">
           <dt className="eyebrow">Plan ID</dt>
-          <dd className="eyebrow">ap_7f3c91e2b0</dd>
+          <dd className="eyebrow">{m.id}</dd>
           <dt className="eyebrow">Signed</dt>
           <dd className="eyebrow">ArmorIQ, valid 10 min</dd>
           <dt className="eyebrow">Scope</dt>
@@ -126,12 +129,7 @@ export function Thread({ msgs, crew, onDecide, onRetry }: { msgs: Msg[]; crew: C
                 <p>{m.text}</p>
               </div>
             )}
-            {m.kind === "text" && (
-              <p className="msg__text">
-                {m.text}
-                {m.streaming && <span className="caret" aria-hidden />}
-              </p>
-            )}
+            {m.kind === "text" && <Rich text={m.text} streaming={m.streaming} />}
             {m.kind === "tools" && <Tools m={m} />}
             {m.kind === "plan" && <Plan m={m} crew={crew} onDecide={onDecide} />}
             {m.kind === "card" && <Card card={m.card} />}

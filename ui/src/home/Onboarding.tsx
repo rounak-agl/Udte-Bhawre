@@ -1,21 +1,21 @@
 import { useState, type CSSProperties } from "react";
-import { ArrowRight, Cloud, HardDrive, KeyRound, X } from "lucide-react";
-import { Button, IconButton, Status } from "../components/ui";
+import { ArrowRight, X } from "lucide-react";
+import { Button, IconButton } from "../components/ui";
+import { BrainSetup } from "./BrainSetup";
 import { crewById, type CrewId } from "../crew/roster";
 import { CrewFace } from "../crew/CrewFace";
 import "../desk/desk.css";
 import "./home.css";
 
-type Props = { crewId: CrewId; onDone: () => void; onClose: () => void; onDragStart?: (e: React.PointerEvent) => void };
+type Props = { crewId: CrewId; onDone: () => void; onClose: () => void; onDragStart?: (e: React.PointerEvent) => void; native?: boolean };
 
-export function Onboarding({ crewId, onDone, onClose, onDragStart }: Props) {
+export function Onboarding({ crewId, onDone, onClose, onDragStart, native }: Props) {
   const c = crewById(crewId);
   const [step, setStep] = useState<"hello" | "brain" | "ready">("hello");
-  const [brain, setBrain] = useState<"local" | "cloud">("local");
   return (
     <div className="desk" style={{ "--c": c.color, "--tint": c.tint } as CSSProperties}>
       <div className="desk__main">
-        <header className="desk__head" onPointerDown={onDragStart}>
+        <header className={`desk__head ${native ? "is-native" : ""}`} onPointerDown={native ? undefined : onDragStart}>
           <span className="desk__id">
             <CrewFace id={c.id} color={c.color} size={30} mood="happy" />
             <span className="desk__names">
@@ -50,25 +50,9 @@ export function Onboarding({ crewId, onDone, onClose, onDragStart }: Props) {
             {step === "brain" && (
               <>
                 <h2 className="display ob__title">Where should I think?</h2>
-                <div className="ob__choices">
-                  <button type="button" className={`ob__choice ${brain === "local" ? "is-on" : ""}`} onClick={() => setBrain("local")}>
-                    <HardDrive />
-                    <span className="ob__ct">
-                      <b>On this computer</b>
-                      <span>Free and private. Nothing leaves your machine.</span>
-                    </span>
-                    <Status tone="live">Ollama found</Status>
-                  </button>
-                  <button type="button" className={`ob__choice ${brain === "cloud" ? "is-on" : ""}`} onClick={() => setBrain("cloud")}>
-                    <Cloud />
-                    <span className="ob__ct">
-                      <b>In the cloud</b>
-                      <span>Faster on older laptops. Needs a free Gemini key.</span>
-                    </span>
-                    <KeyRound className="ob__k" />
-                  </button>
-                </div>
-                <Button variant="ink" label="Use this" trailing={<ArrowRight />} onClick={() => setStep("ready")} />
+                <p className="lede">Pick one. Running on this computer is free and private. Gemini is faster on older laptops.</p>
+                <BrainSetup />
+                <Button variant="ink" label="Continue" trailing={<ArrowRight />} onClick={() => setStep("ready")} />
               </>
             )}
             {step === "ready" && (

@@ -251,7 +251,7 @@
   color: var(--text);
 }
 .did__cell:hover .did__n {
-  color: color-mix(in srgb, var(--c) 70%, #111);
+  color: color-mix(in srgb, var(--c) 72%, var(--text));
 }
 .did__unit {
   font-size: var(--text-sm);
@@ -444,13 +444,96 @@
   font-size: var(--text-lg);
   font-weight: 400;
 }
-.local {
+.brains {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+}
+.local,
+.cloudkey {
   border: 1px solid var(--rule);
+}
+.local {
   border-left: 3px solid var(--up);
+}
+.cloudkey {
+  border-left: 3px solid var(--crew-bo);
+}
+.local__empty {
+  padding: 0 var(--space-4) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.local__empty code,
+.cloudkey code {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.models__added {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--up);
+}
+.models__added svg {
+  width: 12px;
+  height: 12px;
+}
+.cloudkey__head {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-2);
+}
+.cloudkey__head > svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.5;
+}
+.cloudkey__head span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cloudkey__head b {
+  font-weight: 500;
+}
+.cloudkey__row {
+  display: flex;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-4);
+}
+.cloudkey__row input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-2);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.cloudkey__row input:focus {
+  outline: 0;
+  border-color: var(--text);
+}
+.cloudkey__msg {
+  padding: 0 var(--space-4) var(--space-3);
+  font-size: var(--text-sm);
+}
+.cloudkey__msg.is-ok {
+  color: var(--up);
+}
+.cloudkey__msg.is-bad {
+  color: var(--down);
 }
 .local__head {
   display: grid;
-  grid-template-columns: 20px 1fr auto;
+  grid-template-columns: 20px 1fr auto auto;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4);
@@ -606,4 +689,17 @@
   font-family: var(--mono);
   font-size: var(--text-xs);
   cursor: grab;
+}
+[data-native] .home__nav {
+  padding-top: 48px;
+}
+[data-native] .home::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 150px;
+  height: 40px;
+  z-index: var(--z-sticky);
+  -webkit-app-region: drag;
 }

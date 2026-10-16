@@ -25,6 +25,8 @@ import { CREW, crewById, type CrewId } from "../crew/roster";
 import { CrewFace } from "../crew/CrewFace";
 import { ToyStage } from "../crew/ToyStage";
 import { SEED_THREADS } from "../sim/scripts";
+import { setTheme, useTheme, type ThemePref } from "../lib/theme";
+import { BrainSetup } from "./BrainSetup";
 import "./home.css";
 
 type Place = "today" | "crew" | "threads" | "connections" | "settings";
@@ -311,14 +313,9 @@ function Connections() {
   );
 }
 
-const MODELS = [
-  { name: "Qwen 3 14B", size: "9.0 GB", used: ["tuck", "penny"] },
-  { name: "Llama 4 8B", size: "4.9 GB", used: ["pim"] },
-  { name: "Gemma 3 4B", size: "3.3 GB", used: [] },
-];
-
 function SettingsPlace() {
-  const [theme, setTheme] = useState<"system" | "light" | "dark">("system");
+  const { pref } = useTheme();
+  const [theme, setPref] = useState<ThemePref>(pref);
   return (
     <div className="page">
       <header className="page__head">
@@ -326,45 +323,7 @@ function SettingsPlace() {
       </header>
       <section className="set">
         <h2 className="set__h">Brains</h2>
-        <div className="local">
-          <div className="local__head">
-            <HardDrive />
-            <span>
-              <b>Ollama is running on this computer</b>
-              <span className="eyebrow">localhost:11434 · 3 models · nothing leaves your machine</span>
-            </span>
-            <Status tone="live">Ready</Status>
-          </div>
-          <ul className="models">
-            {MODELS.map((m) => (
-              <li key={m.name}>
-                <span className="models__name">{m.name}</span>
-                <span className="eyebrow num">{m.size}</span>
-                <span className="models__who">
-                  {m.used.map((w) => {
-                    const c = crewById(w as CrewId);
-                    return <CrewFace key={w} id={c.id} color={c.color} size={18} />;
-                  })}
-                  {m.used.length === 0 && <span className="eyebrow">Unused</span>}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="keys">
-          {[
-            ["Gemini", "Added", true],
-            ["Claude", "Not added", false],
-            ["OpenAI", "Not added", false],
-          ].map(([n, s, ok]) => (
-            <div key={n as string} className="key">
-              <Cloud />
-              <span className="key__n">{n}</span>
-              <span className="eyebrow">{s}</span>
-              <Button size="sm" label={ok ? "Replace key" : "Add key"} />
-            </div>
-          ))}
-        </div>
+        <BrainSetup />
       </section>
       <section className="set">
         <h2 className="set__h">Look</h2>
@@ -372,8 +331,8 @@ function SettingsPlace() {
           label="Theme"
           value={theme}
           onChange={(v) => {
+            setPref(v);
             setTheme(v);
-            document.documentElement.dataset.theme = v === "dark" ? "dark" : "light";
           }}
           options={[
             { value: "system", label: "System" },

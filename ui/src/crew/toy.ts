@@ -218,7 +218,7 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     for (const s of [-1, 1]) {
       const l = leg(color, kind, len, r, sock);
       l.position.set(s * spread, y, 0.02);
-      lift.add(l);
+      turn.add(l);
       legs.push(l);
     }
   };
@@ -448,6 +448,7 @@ export type RigInput = {
   reduced: boolean;
   intensity: number;
   walk: number;
+  stride: number;
 };
 
 type Confetti = { m: THREE.Mesh; v: THREE.Vector3; life: number };
@@ -666,20 +667,23 @@ export class ToyRig {
         if (since > 0.6) this.state = "idle";
         break;
       case "returning":
-        scale = 0.05;
-        lift = -0.3;
+        scale = inp.walk !== 0 ? 1 : 0.05;
+        lift = inp.walk !== 0 ? 0 : -0.3;
         armR = -2.5 + Math.sin(t * 14) * 0.4;
         break;
     }
 
+    let armSwing = 0;
     if (inp.walk !== 0 && !inp.reduced && this.state !== "held") {
-      const g = Math.abs(Math.sin(t * 9 + ph));
-      lift = g * 0.16;
-      sq = g < 0.15 ? 0.9 : 1.03;
-      turn = inp.walk * 0.55;
-      legSwing = Math.sin(t * 9 + ph) * 0.6;
-      armL = 0.5 + Math.sin(t * 9) * 0.3;
-      armR = -0.5 + Math.sin(t * 9) * 0.3;
+      const a = inp.stride * Math.PI * 2;
+      lift = Math.abs(Math.sin(a)) * 0.05;
+      sq = 1 + Math.abs(Math.cos(a)) * 0.02;
+      turn = inp.walk * 1.05;
+      legSwing = Math.sin(a) * 0.75;
+      armSwing = Math.sin(a) * 0.6;
+      armL = 0.25;
+      armR = -0.25;
+      tilt = 0;
     }
 
     if (t > this.nextBlink && this.state !== "sleeping" && this.state !== "held") {
@@ -717,10 +721,13 @@ export class ToyRig {
     p.squash.scale.set(sx, sy, sx);
     p.turn.rotation.set(this.lean.x, this.turnY.x, this.tilt.x);
     p.root.scale.setScalar(Math.max(0.01, this.scale.x));
-    if (p.arms[0]) p.arms[0].rotation.z = this.armL.x;
+    if (p.arms[0]) {
+      p.arms[0].rotation.z = this.armL.x;
+      p.arms[0].rotation.x = armSwing;
+    }
     if (p.arms[1]) {
       p.arms[1].rotation.z = this.armR.x;
-      p.arms[1].rotation.x = this.armRx.x;
+      p.arms[1].rotation.x = this.armRx.x - armSwing;
     }
     p.legs.forEach((l, i) => (l.rotation.x = legSwing * (i ? 1 : -1)));
     if (p.hat && this.id === "tuck") p.hat.rotation.x = this.hat.x;
