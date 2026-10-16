@@ -27,7 +27,7 @@ function load(win, view, params = {}) {
 }
 
 function prefs() {
-  return { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false };
+  return { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' };
 }
 
 function surface() {

@@ -3,6 +3,7 @@ import { crewById, type CrewId } from "../crew/roster";
 import { isMini, parentOf, useMinis } from "../crew/minis";
 import { ToyStage, type StageToy } from "../crew/ToyStage";
 import { bridge } from "../lib/bridge";
+import { cue, useCrewSounds } from "../lib/sound";
 import { readAttachment } from "../desk/Desk";
 import { sim, useWorld } from "../sim/store";
 import { Portal } from "../stage/Portal";
@@ -14,6 +15,7 @@ const SIZE = 42;
 export default function StageView() {
   useStageSync();
   const world = useWorld();
+  useCrewSounds(world);
   const [area, setArea] = useState({ w: innerWidth, h: innerHeight });
   const [opening, setOpening] = useState<CrewId | null>(null);
   const hover = useRef<string | null>(null);
@@ -54,6 +56,7 @@ export default function StageView() {
   const minis = useMinis(world, (_id, i) => ({ x: slotX(i), y: area.h - 8 }), portal);
   const anchorOf = (id: CrewId) => ({ x: slotX(Math.max(0, world.summoned.indexOf(id))), y: area.h - SIZE * 1.6 });
   const open = (id: CrewId) => {
+    cue("open", id);
     sim.dismissPeek(id);
     if (world.crew[id].state === "sleeping") sim.setState(id, "idle");
     bridge?.openDesk(id, anchorOf(id));

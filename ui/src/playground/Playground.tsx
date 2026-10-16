@@ -4,6 +4,7 @@ import "dialkit/styles.css";
 import { House, Monitor, Sparkles } from "lucide-react";
 import { Segmented } from "../components/ui";
 import { CREW, crewById, type CrewId } from "../crew/roster";
+import { useCrewSounds } from "../lib/sound";
 import { isMini, parentOf, useMinis } from "../crew/minis";
 import { ToyStage, type StageToy } from "../crew/ToyStage";
 import { Desk, type DeskMode } from "../desk/Desk";
@@ -32,6 +33,7 @@ function useArea(ref: React.RefObject<HTMLDivElement | null>) {
 
 export default function Playground() {
   const world = useWorld();
+  useCrewSounds(world);
   const [scene, setScene] = useState<Scene>("desktop");
   const [open, setOpen] = useState<CrewId | null>(null);
   const [mode, setMode] = useState<DeskMode>("popover");

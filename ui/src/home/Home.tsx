@@ -28,6 +28,7 @@ import { ToyStage } from "../crew/ToyStage";
 import { sim, useWorld, type Connector, type World } from "../sim/store";
 import type { Msg } from "../sim/types";
 import { bridge } from "../lib/bridge";
+import { cue, setSound, soundOn } from "../lib/sound";
 import { setTheme, useTheme, type ThemePref } from "../lib/theme";
 import { BrainSetup } from "./BrainSetup";
 import "./home.css";
@@ -413,6 +414,7 @@ function Connections({ world }: { world: World }) {
 function SettingsPlace() {
   const { pref } = useTheme();
   const [theme, setPref] = useState<ThemePref>(pref);
+  const [sound, setSoundState] = useState(soundOn() ? "on" : "off");
   return (
     <div className="page">
       <header className="page__head">
@@ -435,6 +437,22 @@ function SettingsPlace() {
             { value: "system", label: "System" },
             { value: "light", label: "Light" },
             { value: "dark", label: "Dark" },
+          ]}
+        />
+      </section>
+      <section className="set">
+        <h2 className="set__h">Sound</h2>
+        <Segmented
+          label="Sound"
+          value={sound}
+          onChange={(v) => {
+            setSoundState(v);
+            setSound(v === "on");
+            if (v === "on") cue("done", "pim");
+          }}
+          options={[
+            { value: "off", label: "Off" },
+            { value: "on", label: "Little chirps" },
           ]}
         />
       </section>
