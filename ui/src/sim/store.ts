@@ -11,7 +11,22 @@ export type CrewLive = {
   busy: boolean;
   waiting: boolean;
   queued: string[];
+  updated: number;
+  jobs: number;
+  steps: number;
+  day: string;
+  subs: Sub[];
 };
+
+export type Sub = { id: string; title: string; status: "running" | "done" | "failed" };
+
+const subStatus = (s: string): Sub["status"] => (/fail|error|cancel/i.test(s) ? "failed" : /done|complete|finish|success/i.test(s) ? "done" : "running");
+
+export type Connector = { id: string; name: string; description: string; category: string; who: CrewId[]; on: boolean };
+
+export type Overview = { providers: Brain[]; assigned: Partial<Record<CrewId, Brain | null>>; hasGeminiKey: boolean; connectors?: Connector[] };
+
+const today = () => new Date().toDateString();
 
 export type Brain = { key: string; name: string; kind: "local" | "cloud"; supportsImages?: boolean };
 
@@ -24,9 +39,10 @@ type World = {
   providers: Brain[];
   hasGeminiKey: boolean;
   needsSetup: boolean;
+  connectors: Connector[];
 };
 
-const blank = (): CrewLive => ({ state: "idle", msgs: [], peek: null, busy: false, waiting: false, queued: [] });
+const blank = (): CrewLive => ({ state: "idle", msgs: [], peek: null, busy: false, waiting: false, queued: [], updated: 0, jobs: 0, steps: 0, day: today(), subs: [] });
 
 let world: World = {
   crew: Object.fromEntries(CREW.map((c) => [c.id, blank()])) as Record<CrewId, CrewLive>,
@@ -37,6 +53,7 @@ let world: World = {
   providers: [],
   hasGeminiKey: false,
   needsSetup: false,
+  connectors: [],
 };
 
 const subs = new Set<() => void>();
@@ -47,11 +64,18 @@ const patch = (id: CrewId, p: Partial<CrewLive> | ((c: CrewLive) => Partial<Crew
   world = { ...world, crew: { ...world.crew, [id]: { ...cur, ...next } } };
   emit();
 };
-const push = (id: CrewId, m: Msg) => patch(id, (c) => ({ msgs: [...c.msgs, m] }));
+const push = (id: CrewId, m: Msg) => patch(id, (c) => ({ msgs: [...c.msgs, m], updated: Date.now() }));
+const tally = (id: CrewId, k: "jobs" | "steps") =>
+  patch(id, (c) => {
+    const d = today();
+    const base = c.day === d ? c : { ...c, jobs: 0, steps: 0 };
+    return { day: d, jobs: base.jobs + (k === "jobs" ? 1 : 0), steps: base.steps + (k === "steps" ? 1 : 0) };
+  });
 const edit = (id: CrewId, mid: string, f: (m: Msg) => Msg) => patch(id, (c) => ({ msgs: c.msgs.map((m) => (m.id === mid ? f(m) : m)) }));
 
 let n = 0;
-const uid = () => `m${++n}`;
+const boot = Date.now().toString(36);
+const uid = () => `m${boot}${++n}`;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms / world.speed));
 const approvals = new Map<string, (ok: boolean) => void>();
 
@@ -78,6 +102,7 @@ async function run(id: CrewId, script: Script, text: string, files?: { name: str
       await sleep(s.tool.ms ?? 600);
       const tid = toolsId;
       edit(id, tid, (m) => (m.kind === "tools" ? { ...m, items: m.items.map((x) => (x.id === item.id ? { ...x, status: s.fail ? "failed" : "done" } : x)) } : m));
+      if (!s.fail) tally(id, "steps");
     } else if ("stream" in s) {
       toolsId = null;
       const mid = uid();
@@ -118,6 +143,7 @@ async function run(id: CrewId, script: Script, text: string, files?: { name: str
     }
   }
   patch(id, { busy: false });
+  tally(id, "jobs");
   await sleep(2600);
   if (world.crew[id].state === "done") patch(id, { state: "idle" });
 }
@@ -192,6 +218,7 @@ function onBackend(id: CrewId, channel: string, args: unknown[]) {
         const idx = m.items.findIndex((x) => x.status === "running");
         if (idx < 0) break;
         edit(id, m.id, (mm) => (mm.kind === "tools" ? { ...mm, items: mm.items.map((x, j) => (j === idx ? { ...x, status: failed ? "failed" : "done", detail: String(args[0] ?? "") } : x)) } : mm));
+        if (!failed) tally(id, "steps");
         break;
       }
       break;
@@ -203,6 +230,12 @@ function onBackend(id: CrewId, channel: string, args: unknown[]) {
       patch(id, { state: "needs-you", waiting: true, peek: "Needs your OK to continue." });
       break;
     }
+    case "subagents-update": {
+      const u = (args[0] ?? {}) as { active?: boolean; tasks?: { id: string; title: string; status: string }[] };
+      const subs = u.active === false ? [] : (u.tasks ?? []).map((t) => ({ id: String(t.id), title: String(t.title ?? ""), status: subStatus(t.status) }));
+      patch(id, { subs });
+      break;
+    }
     case "chat-error":
       closeStream(id);
       turnFailed.add(id);
@@ -211,6 +244,7 @@ function onBackend(id: CrewId, channel: string, args: unknown[]) {
     case "chat-turn-complete": {
       closeStream(id);
       const failed = turnFailed.has(id);
+      if (!failed) tally(id, "jobs");
       const texts = world.crew[id].msgs.filter((m) => m.kind === "text");
       const lastText = texts[texts.length - 1];
       const line = lastText && lastText.kind === "text" ? lastText.text.replace(/```[\s\S]*?```/g, "").trim().split(/(?<=[.!?])\s/)[0]?.slice(0, 110) : "";
@@ -237,9 +271,9 @@ export const sim = {
   backend(evt: { id: CrewId; channel: string; args: unknown[] }) {
     onBackend(evt.id, evt.channel, evt.args);
   },
-  setBrains(o: { providers: Brain[]; assigned: Partial<Record<CrewId, Brain | null>>; hasGeminiKey: boolean }) {
+  setBrains(o: Overview) {
     const needsSetup = !o.hasGeminiKey && !o.providers.some((p) => p.kind === "local");
-    world = { ...world, providers: o.providers, brains: o.assigned, hasGeminiKey: o.hasGeminiKey, needsSetup, summoned: needsSetup && !world.needsSetup ? [] : world.summoned };
+    world = { ...world, providers: o.providers, brains: o.assigned, hasGeminiKey: o.hasGeminiKey, needsSetup, connectors: o.connectors ?? world.connectors, summoned: needsSetup && !world.needsSetup ? [] : world.summoned };
     emit();
   },
   stop(id: CrewId) {
@@ -279,6 +313,9 @@ export const sim = {
   setState(id: CrewId, state: ToyState) {
     patch(id, { state });
   },
+  setSubs(id: CrewId, subs: Sub[]) {
+    patch(id, { subs });
+  },
   dismissPeek(id: CrewId) {
     patch(id, { peek: null });
   },
@@ -314,6 +351,17 @@ export const sim = {
   },
   hydrate(w: World) {
     world = w;
+    emit();
+  },
+  restore(saved: Partial<Record<CrewId, Pick<CrewLive, "msgs" | "updated" | "jobs" | "steps" | "day">>>) {
+    const crew = { ...world.crew };
+    for (const c of CREW) {
+      const h = saved[c.id];
+      if (!h) continue;
+      const msgs = h.msgs.map((m): Msg => (m.kind === "plan" && m.status === "pending" ? { ...m, status: "denied" } : m.kind === "text" && m.streaming ? { ...m, streaming: false } : m));
+      crew[c.id] = { ...crew[c.id], msgs, updated: h.updated, ...(h.day === today() ? { jobs: h.jobs, steps: h.steps, day: h.day } : {}) };
+    }
+    world = { ...world, crew };
     emit();
   },
   subscribe(f: () => void) {

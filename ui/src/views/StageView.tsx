@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { crewById, type CrewId } from "../crew/roster";
+import { isMini, parentOf, useMinis } from "../crew/minis";
 import { ToyStage, type StageToy } from "../crew/ToyStage";
 import { bridge } from "../lib/bridge";
+import { cue, useCrewSounds } from "../lib/sound";
 import { readAttachment } from "../desk/Desk";
 import { sim, useWorld } from "../sim/store";
 import { Portal } from "../stage/Portal";
@@ -13,6 +15,7 @@ const SIZE = 42;
 export default function StageView() {
   useStageSync();
   const world = useWorld();
+  useCrewSounds(world);
   const [area, setArea] = useState({ w: innerWidth, h: innerHeight });
   const [opening, setOpening] = useState<CrewId | null>(null);
   const hover = useRef<string | null>(null);
@@ -50,8 +53,10 @@ export default function StageView() {
     () => world.summoned.map((id, i) => ({ key: id, id, hex: crewById(id).hex, x: slotX(i), y: area.h - 8, state: world.crew[id].state, size: SIZE, spawn: portal })),
     [world, area.w, area.h],
   );
+  const minis = useMinis(world, (_id, i) => ({ x: slotX(i), y: area.h - 8 }), portal);
   const anchorOf = (id: CrewId) => ({ x: slotX(Math.max(0, world.summoned.indexOf(id))), y: area.h - SIZE * 1.6 });
   const open = (id: CrewId) => {
+    cue("open", id);
     sim.dismissPeek(id);
     if (world.crew[id].state === "sleeping") sim.setState(id, "idle");
     bridge?.openDesk(id, anchorOf(id));
@@ -60,20 +65,22 @@ export default function StageView() {
   return (
     <div style={{ position: "fixed", inset: 0 }}>
       <ToyStage
-        toys={toys}
+        toys={[...toys, ...minis]}
         float
         onHoverChange={(k) => {
           hover.current = k;
           (window as Window & { __crewSync?: () => void }).__crewSync?.();
         }}
-        onToyClick={(k) => open(k as CrewId)}
+        onToyClick={(k) => open(parentOf(k))}
         onToyDrop={(k, dt) => {
           const list = [...dt.files];
           const text = dt.getData("text/plain") || undefined;
-          void Promise.all(list.slice(0, 4).map(readAttachment)).then((files) => sim.send(k as CrewId, text, files.length ? files : undefined));
-          open(k as CrewId);
+          const id = parentOf(k);
+          void Promise.all(list.slice(0, 4).map(readAttachment)).then((files) => sim.send(id, text, files.length ? files : undefined));
+          open(id);
         }}
         overlay={(t) => {
+          if (isMini(t.key)) return null;
           const id = t.key as CrewId;
           const live = world.crew[id];
           return <ToyOverlay crew={crewById(id)} state={live.state} peek={live.peek} small onOpen={() => open(id)} onDismissPeek={() => sim.dismissPeek(id)} />;

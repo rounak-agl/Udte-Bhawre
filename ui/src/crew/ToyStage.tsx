@@ -13,6 +13,8 @@ export type StageToy = {
   state: ToyState;
   size?: number;
   spawn?: { x: number; y: number };
+  spawnFrom?: string;
+  follow?: boolean;
 };
 
 type Body = {
@@ -238,9 +240,11 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         let b = bodies.current.get(t.key);
         if (!b) {
           const seed = ++seedN + t.key.length;
-          const fromPortal = !!t.spawn && t.state === "hatching";
-          const sx = fromPortal ? t.spawn!.x : t.x;
-          const sy = fromPortal ? t.spawn!.y : t.y;
+          const parent = t.spawnFrom ? bodies.current.get(t.spawnFrom) : undefined;
+          const origin = parent ? { x: parent.pos.x, y: parent.pos.y - parent.size * 0.8 } : t.spawn;
+          const fromPortal = !!origin && t.state === "hatching";
+          const sx = fromPortal ? origin!.x : t.x;
+          const sy = fromPortal ? origin!.y : t.y;
           const rig = new ToyRig(t.id, t.hex, seed);
           sc.add(rig.parts.root);
           b = {
@@ -263,7 +267,11 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
             fromPortal,
             walking: false,
           };
-          if (fromPortal) {
+          if (fromPortal && parent) {
+            b.tossed = true;
+            b.vel.set((t.x >= parent.pos.x ? 1 : -1) * (60 + Math.random() * 60), -380);
+            b.angVel = (Math.random() - 0.5) * 6;
+          } else if (fromPortal) {
             b.tossed = true;
             b.vel.set(-140 - Math.random() * 90, -460);
             b.angVel = -4 - Math.random() * 3;
@@ -273,7 +281,9 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         }
         b.size = t.size ?? 64;
         const ground = t.y;
-        if (!b.placed && !b.tossed && !(drag && drag.key === t.key)) b.home.set(t.x, t.y);
+        const lead = t.follow && t.spawnFrom ? bodies.current.get(t.spawnFrom) : undefined;
+        if (lead && !(drag && drag.key === t.key)) b.home.set(THREE.MathUtils.clamp(lead.home.x + t.x, b.size, W - b.size), t.y);
+        else if (!b.placed && !b.tossed && !(drag && drag.key === t.key)) b.home.set(t.x, t.y);
         const isDrag = !!drag && drag.key === t.key && drag.moved;
         b.held = isDrag;
         let s: ToyState = t.state;
@@ -337,7 +347,7 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
           b.angVel += (-b.angle * 160 - b.angVel * 11) * dt;
           b.angle += b.angVel * dt;
           const busy = t.state !== "idle" || hoverKey.current === t.key || dropKey.current === t.key;
-          if (L.float && !L.reduced && !busy && now > b.wanderAt) {
+          if (L.float && !L.reduced && !busy && !t.follow && now > b.wanderAt) {
             b.wanderAt = now + 6000 + Math.random() * 8000;
             const span = b.size * (1.5 + Math.random() * 2.5);
             const dir = Math.random() < 0.5 ? -1 : 1;
@@ -350,8 +360,9 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
             b.home.set(tx, ground);
             b.placed = true;
           }
-          const goHome = t.state === "returning" && t.spawn;
-          const hx = goHome ? t.spawn!.x : b.home.x;
+          const back = t.spawnFrom ? bodies.current.get(t.spawnFrom)?.pos : t.spawn;
+          const goHome = t.state === "returning" && !!back;
+          const hx = goHome ? back!.x : b.home.x;
           const hy = L.float ? ground : b.home.y;
           const dx = hx - b.pos.x;
           b.pos.y += (hy - b.pos.y) * Math.min(1, dt * 12);
@@ -370,7 +381,7 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
 
         const root = b.rig.parts.root;
         const c = b.size * b.rig.parts.height * 0.5;
-        root.position.set(b.pos.x + c * Math.sin(b.angle), -b.pos.y + c - c * Math.cos(b.angle), b.walking ? -120 : 0);
+        root.position.set(b.pos.x + c * Math.sin(b.angle), -b.pos.y + c - c * Math.cos(b.angle), b.walking ? -120 : t.follow ? 60 : 0);
         root.rotation.set(L.tilt, 0, b.angle);
         const headY = b.pos.y - b.size * b.rig.parts.height;
         const look = {

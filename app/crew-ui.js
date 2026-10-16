@@ -27,15 +27,32 @@ function load(win, view, params = {}) {
 }
 
 function prefs() {
-  return { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false };
+  return { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' };
 }
 
 function surface() {
   return nativeTheme.shouldUseDarkColors ? '#181818' : '#ffffff';
 }
 
+let stageDisplayId = null;
+
+function stageDisplay() {
+  return screen.getAllDisplays().find((d) => d.id === stageDisplayId) || screen.getPrimaryDisplay();
+}
+
 function workArea() {
-  return screen.getPrimaryDisplay().workArea;
+  return stageDisplay().workArea;
+}
+
+function refitStage() {
+  if (!windows.stage || windows.stage.isDestroyed()) return;
+  const wa = workArea();
+  windows.stage.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height });
+}
+
+function moveCrewTo(id) {
+  stageDisplayId = id;
+  refitStage();
 }
 
 function createStage() {
@@ -188,6 +205,7 @@ function registerCrewIpc() {
     return backend.setGeminiKey(key);
   });
   ipcMain.handle('crew:desk-crew', () => deskCrew);
+  ipcMain.on('crew:open-connectors', () => require('./control-centre').openControlCentre('connectors'));
 }
 
 function startCrewUI() {
@@ -197,18 +215,28 @@ function startCrewUI() {
   app.on('before-quit', () => backend.shutdown());
   console.log('[crew] brains', JSON.stringify(backend.overview().assigned));
   createStage();
-  screen.on('display-metrics-changed', () => {
-    if (!windows.stage || windows.stage.isDestroyed()) return;
-    const wa = workArea();
-    windows.stage.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height });
-  });
+  for (const evt of ['display-metrics-changed', 'display-added', 'display-removed']) screen.on(evt, refitStage);
 }
 
 function trayTemplate() {
+  const displays = screen.getAllDisplays();
   return [
     { label: 'Open Home base', click: () => openHome() },
     { label: 'Show the crew', click: () => windows.stage && !windows.stage.isDestroyed() && windows.stage.showInactive() },
     { label: 'Hide the crew', click: () => windows.stage && !windows.stage.isDestroyed() && windows.stage.hide() },
+    ...(displays.length > 1
+      ? [
+          {
+            label: 'Crew lives on',
+            submenu: displays.map((d, i) => ({
+              label: `Screen ${i + 1} (${d.size.width}x${d.size.height})${d.id === screen.getPrimaryDisplay().id ? ', main' : ''}`,
+              type: 'radio',
+              checked: d.id === stageDisplay().id,
+              click: () => moveCrewTo(d.id)
+            }))
+          }
+        ]
+      : []),
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() }
   ];
