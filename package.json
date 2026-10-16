@@ -6,8 +6,9 @@
   "scripts": {
     "start": "electron . --no-sandbox --disable-dev-shm-usage",
     "test": "node --test \"test/*.test.js\"",
-    "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux"
+    "build:ui": "npm --prefix ui ci && npm --prefix ui run build",
+    "build:win": "npm run build:ui && electron-builder --win",
+    "build:linux": "npm run build:ui && electron-builder --linux"
   },
   "author": "",
   "license": "MIT",
@@ -22,6 +23,16 @@
   "build": {
     "appId": "com.desktop-assistant.app",
     "productName": "Desktop Assistant",
+    "files": [
+      "**/*",
+      "!ui/**",
+      "ui/dist/**",
+      "!docs/**",
+      "!test/**",
+      "!.shots/**",
+      "!.playwright-mcp/**",
+      "!.claude/**"
+    ],
     "win": {
       "target": "nsis"
     },
