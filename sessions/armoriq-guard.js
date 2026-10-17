@@ -220,7 +220,7 @@ class ArmorIQGuard extends EventEmitter {
       // Capture the plan with ArmorIQ
       console.log(`[ArmorIQ] 📋 Capturing plan for: "${prompt.substring(0, 80)}..."`);
       const planCapture = this.client.capturePlan(
-        'gemini-2.5-flash', // LLM model identifier
+        'gemini-3.8-flash', // LLM model identifier (keep in sync with vision-session.js)
         prompt,
         plan,
         {

@@ -5,6 +5,9 @@ const { getMcpServers } = require('./agent-session');
 const { toGeminiContents, userEntry, promptWithImages } = require('./conversation-context');
 const { RESULTS_MARKER } = require('./orchestration');
 
+// Gemini model for chat, tool calls and planning (gemini-2.5-flash isn't offered to new API projects)
+const GEMINI_MODEL = 'gemini-3.8-flash';
+
 /**
  * Gemini Vision API Session with MCP Tool Support.
  * Uses @google/genai SDK for multimodal (text + images the user attaches) queries
@@ -157,7 +160,7 @@ class VisionSession extends EventEmitter {
 
       this.isRunning = true;
       this.emit('sessionReady');
-      console.log(`[VisionSession] Initialized with gemini-2.5-flash (tools ${this.toolsEnabled ? 'on' : 'off'})`);
+      console.log(`[VisionSession] Initialized with ${GEMINI_MODEL} (tools ${this.toolsEnabled ? 'on' : 'off'})`);
       if (this.toolsEnabled) {
         console.log(`[VisionSession] Available tools: ${this.mcpClient.getAllFunctionDeclarations().map(t => t.name).join(', ')}`);
       }
@@ -264,7 +267,7 @@ class VisionSession extends EventEmitter {
     for (let i = 0; i < maxIterations; i++) {
       // Stream response from Gemini
       const responseStream = await this.ai.models.generateContentStream({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: this._conversationHistory,
         config: {
           tools,
@@ -408,7 +411,7 @@ class VisionSession extends EventEmitter {
       const known = new Set(declarations.map(d => d.name));
       const list = declarations.map(d => `- ${d.name}: ${String(d.description || '').slice(0, 200)}`).join('\n');
       const res = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: this._requestContents(),
         config: {
           systemInstruction: `${PLANNING_PROMPT}\n\nTOOLS:\n${list}`,
@@ -441,7 +444,7 @@ class VisionSession extends EventEmitter {
     if (typeof this.ai?.models?.generateContent !== 'function') return false;
     try {
       const res = await this.ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: this._requestContents(),
         config: {
           systemInstruction: STEP_CHECK_PROMPT(tool),

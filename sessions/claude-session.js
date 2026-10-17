@@ -56,7 +56,15 @@ class ClaudeSession extends CliSession {
       '--input-format', 'stream-json',
       // No --dangerously-skip-permissions: in non-interactive mode, tools that need
       // permission (Bash, Edit, Write) are denied instead of running unattended.
-      '--verbose'
+      '--verbose',
+      // ArmorClaude (ArmorIQ's Claude Code plugin) has Claude register an intent plan
+      // through its own MCP server before acting. Non-interactive mode would deny that
+      // call, so pre-approve the plugin's server; a no-op when the plugin isn't installed.
+      '--allowedTools', 'mcp__plugin_armorclaude_armorclaude-policy',
+      // Read-only git needs no prompt; anything that writes (commit, push…) is still denied
+      // (also as `git -C <repo> …`, since Claude runs from the home folder)
+      'Bash(git status:*)', 'Bash(git log:*)', 'Bash(git diff:*)',
+      'Bash(git -C * status*)', 'Bash(git -C * log *)', 'Bash(git -C * diff*)'
     ];
     // Agent persona/context file and any earlier conversation (restored from the
     // database or carried over from a previous session), added on top of Claude's
