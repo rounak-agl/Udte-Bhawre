@@ -14,6 +14,63 @@ export type BusMsg =
 
 export type LocalStatus = { running: boolean; error?: string; models: { name: string; size: number }[]; added: { id: string; model: string; name: string }[] };
 
+export type KeyProvider = "gemini" | "claude" | "codex" | "copilot";
+
+export type SecurityOverview = {
+  guard: { active: boolean; keySource: string | null; envOverride: boolean };
+  policy: { allow: string[]; deny: string[]; path: string };
+  approvalTools: string[];
+  tools: string[];
+  fileAccess: string;
+  secrets: { encrypted: boolean; backend?: string; platform?: string };
+};
+
+export type AppInfo = { name: string; version: string; electron: string; node: string; chrome: string; platform: string; settingsFile: string; policyFile: string; database: string };
+
+export type ArmorTest = { state: "ok" | "off" | "invalid" | "unreachable" | "error"; message: string };
+
+export type Field = { key: string; label: string; required?: boolean; secret?: boolean; placeholder?: string; description?: string; helpUrl?: string; default?: string };
+
+export type Install = { type?: "http"; url?: string; command?: string; args?: (string | string[])[]; runtime?: string; env?: Record<string, string>; headers?: Record<string, string> };
+
+/** A server from the curated catalog (verified) or the public MCP Registry (not reviewed). */
+export type ServerEntry = {
+  id?: string;
+  name: string;
+  description?: string;
+  category?: string;
+  publisher?: string;
+  icon?: string;
+  homepage?: string;
+  verified?: boolean;
+  installable?: boolean;
+  reason?: string;
+  registryName?: string;
+  version?: string;
+  install?: Install;
+  fields?: Field[];
+};
+
+export type Runtime = { label: string; binary: string; installUrl?: string };
+
+export type Catalog = { categories: string[]; entries: ServerEntry[]; runtimes: Record<string, boolean>; runtimeInfo: Record<string, Runtime> };
+
+/** A saved server config (settings file), as the main process sanitised it. */
+export type ServerConfig = {
+  type?: "http";
+  url?: string;
+  headers?: Record<string, string>;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  source?: "catalog" | "registry" | "custom";
+  catalogId?: string;
+  registryName?: string;
+  displayName?: string;
+};
+
+export type TestResult = { ok: boolean; tools?: string[]; error?: string };
+
 type Bridge = {
   post: (m: BusMsg) => void;
   on: (fn: (m: BusMsg) => void) => () => void;
@@ -33,6 +90,30 @@ type Bridge = {
   localAdd: (model: string) => Promise<{ ok: boolean; key?: string; error?: string }>;
   setKey: (key: string) => Promise<{ ok: boolean; error?: string }>;
   openConnectors: () => void;
+  // Only answered for Home base (the main process checks the sender)
+  settings: {
+    providerKeys: () => Promise<Partial<Record<KeyProvider, string>>>;
+    setProviderKey: (provider: KeyProvider, key: string) => void;
+    elevenLabsKey: () => Promise<string>;
+    setElevenLabsKey: (key: string) => void;
+    mongodbUri: () => Promise<string>;
+    setMongodbUri: (uri: string) => Promise<{ connected: boolean; error?: string; keptPrevious?: boolean }>;
+    armorIQKey: () => Promise<string>;
+    setArmorIQKey: (key: string) => Promise<boolean>;
+    testArmorIQ: () => Promise<ArmorTest | null>;
+    security: () => Promise<SecurityOverview | null>;
+    secretStorage: () => Promise<{ encrypted: boolean; backend?: string; platform?: string } | null>;
+    appInfo: () => Promise<AppInfo>;
+  };
+  connectors: {
+    installed: () => Promise<Record<string, ServerConfig>>;
+    catalog: () => Promise<Catalog | null>;
+    search: (query: string, cursor?: string) => Promise<{ ok: boolean; servers?: ServerEntry[]; nextCursor?: string | null; error?: string }>;
+    install: (request: { catalogId?: string; registryName?: string; version?: string; values: Record<string, string>; force?: boolean }) => Promise<{ ok: boolean; id?: string; tools?: string[]; error?: string; canForce?: boolean }>;
+    test: (target: string | ServerConfig) => Promise<TestResult>;
+    save: (request: { id: string; config: ServerConfig; previousId?: string }) => Promise<{ ok: boolean; id?: string; error?: string }>;
+    uninstall: (id: string) => Promise<boolean>;
+  };
   onBackend: (fn: (e: { id: CrewId; channel: string; args: unknown[] }) => void) => () => void;
 };
 

@@ -12,8 +12,12 @@ const { app } = require('electron');
 
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-transparent-visuals');
-  app.commandLine.appendSwitch('disable-gpu');
-  app.disableHardwareAcceleration();
+  // Software rendering keeps transparent windows working on every Linux setup, but the
+  // 3D crew then costs a lot of CPU. GPU=1 renders on the graphics card instead.
+  if (process.env.GPU !== '1') {
+    app.commandLine.appendSwitch('disable-gpu');
+    app.disableHardwareAcceleration();
+  }
 }
 
 // Node gives each resolved address only 250 ms to connect before moving on; on a slow or
@@ -44,7 +48,14 @@ const { connectDB } = require('./utils/db');
 const { markInterruptedTasks } = require('./app/orchestrator');
 const { registerCrewIpc, startCrewUI } = require('./app/crew-ui');
 
-const CREW_UI = process.env.CREW_UI === '1';
+// The 3D crew is the default UI; CREW_UI=0 brings back the classic Control Centre and 2D bots.
+// The crew is a separate build (ui/dist, made by `npm run build:ui`): without it, use classic.
+const CREW_BUILT = !!process.env.CREW_UI_DEV || require('fs').existsSync(require('path').join(__dirname, 'ui', 'dist', 'index.html'));
+const CREW_UI = process.env.CREW_UI !== '0' && CREW_BUILT;
+if (process.env.CREW_UI !== '0' && !CREW_BUILT) {
+  console.warn('[crew] The 3D crew UI is not built yet (ui/dist is missing). Run `npm run build:ui`, then restart. Opening the classic UI for now.');
+}
+state.crewUI = CREW_UI;
 
 // ── Security + IPC (registered at load, before any window exists) ──
 installNavigationGuards(app);
@@ -70,8 +81,10 @@ app.whenReady().then(async () => {
     const connected = await connectDB(getMongodbUri() || process.env.MONGODB_URI);
     if (connected) {
       await markInterruptedTasks(); // sub-agent tasks cut off by the last quit
-      console.log('[DB] Loading stored agents...');
-      await syncAgentsWithDB();
+      if (!CREW_UI) {
+        console.log('[DB] Loading stored agents...');
+        await syncAgentsWithDB();
+      }
     }
   } catch (e) {
     console.error('[DB] Connection/Load failed:', e);

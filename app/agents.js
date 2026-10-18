@@ -96,7 +96,7 @@ function removeAgentInstance(agentId) {
  * Runs at startup and after the MongoDB URI is changed in Settings.
  */
 async function syncAgentsWithDB() {
-  if (!isDBConnected()) return;
+  if (!isDBConnected() || state.crewUI) return;
   try {
     const agents = await Agent.find().sort({ createdAt: 1 });
     console.log(`[DB] Found ${agents.length} agents in database.`);
@@ -150,6 +150,7 @@ function restartSessions(notify) {
     if (notify) notify(c);
     if (c.session) c.createSession();
   });
+  if (state.crewUI) require('./crew-backend').restartAll();
 }
 
 module.exports = {

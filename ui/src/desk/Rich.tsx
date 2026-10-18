@@ -106,6 +106,11 @@ export function Rich({ text, streaming }: { text: string; streaming?: boolean })
       if (card) parts.push(<Card key={`c${n}`} card={card} />);
       else if (!closed) parts.push(<div key={`s${n}`} className="card-skel" aria-label="Building a card" />);
       else parts.push(<pre key={`x${n}`} className="code">{m[2]}</pre>);
+    } else if (m[1] === "delegate") {
+      // Orchestration plan for the backend; the sub-agents show up as minis on the stage
+      parts.push(<p key={`d${n}`}><em>Handing this to sub-agents…</em></p>);
+    } else if (m[1] === "remember") {
+      // Team-memory notes for the backend, not for the person
     } else {
       parts.push(
         <pre key={`x${n}`} className="code">

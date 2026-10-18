@@ -31,6 +31,9 @@ import { bridge } from "../lib/bridge";
 import { cue, setSound, soundOn } from "../lib/sound";
 import { setTheme, useTheme, type ThemePref } from "../lib/theme";
 import { BrainSetup } from "./BrainSetup";
+import { Connections } from "./Connectors";
+import { AboutPanel, ArmorPanel, KeysPanel } from "./Keys";
+import "./settings.css";
 import "./home.css";
 
 type Place = "today" | "crew" | "threads" | "connections" | "settings";
@@ -371,46 +374,6 @@ function Threads({ onOpenCrew, world }: { onOpenCrew: (id: CrewId) => void; worl
   );
 }
 
-function Connections({ world }: { world: World }) {
-  const list = connectorsOf(world);
-  const open = () => bridge?.openConnectors();
-  return (
-    <div className="page">
-      <header className="page__head">
-        <h1 className="page__title">Connections</h1>
-        <p className="lede">The apps your crew may use. Each one asks before it sends, pays, deletes or posts.</p>
-      </header>
-      {list.length === 0 ? (
-        <Empty>Loading your connections.</Empty>
-      ) : (
-        <div className="conns">
-          {list.map((x, i) => {
-            const Ic = ICONS[x.id] ?? Plug;
-            return (
-              <div key={x.id} className={`conn grid-cell rise ${x.on ? "is-on" : ""}`} style={{ "--i": i } as CSSProperties} title={x.description || undefined}>
-                <Ic className="conn__ic" />
-                <span className="conn__name">{x.name}</span>
-                <span className="conn__who">
-                  {x.who.map((w) => {
-                    const c = crewById(w);
-                    return <CrewFace key={w} id={c.id} color={c.color} size={18} />;
-                  })}
-                </span>
-                {x.on ? <Status tone="done">Connected</Status> : <Button size="sm" label="Connect" disabled={!bridge} onClick={open} />}
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <button type="button" className="link-btn adv" onClick={open} disabled={!bridge}>
-        More apps from the public MCP registry
-        <ChevronRight />
-      </button>
-      <p className="field__hint adv__note">Servers from the public registry are not reviewed. Add them only if you trust the author. They run with the same approval rules.</p>
-    </div>
-  );
-}
-
 function SettingsPlace() {
   const { pref } = useTheme();
   const [theme, setPref] = useState<ThemePref>(pref);
@@ -422,7 +385,15 @@ function SettingsPlace() {
       </header>
       <section className="set">
         <h2 className="set__h">Brains</h2>
-        <BrainSetup />
+        <BrainSetup cloud={false} />
+      </section>
+      <section className="set">
+        <h2 className="set__h">Keys</h2>
+        <KeysPanel />
+      </section>
+      <section className="set">
+        <h2 className="set__h">ArmorIQ</h2>
+        <ArmorPanel />
       </section>
       <section className="set">
         <h2 className="set__h">Look</h2>
@@ -483,6 +454,10 @@ function SettingsPlace() {
             </li>
           ))}
         </ul>
+      </section>
+      <section className="set">
+        <h2 className="set__h">About</h2>
+        <AboutPanel />
       </section>
     </div>
   );

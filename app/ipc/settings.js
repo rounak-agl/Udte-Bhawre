@@ -97,6 +97,7 @@ function registerSettingsIpc() {
       c.sendToChat('api-key-changed');
       c.createSession();
     });
+    if (state.crewUI) require('../crew-backend').restartAll(c => apiKeyProviderFor(c.provider) === provider);
   });
 
   ipcMain.on('set-eleven-labs-api-key', (event, key) => {
@@ -140,6 +141,7 @@ function registerSettingsIpc() {
     state.characters.forEach(c => {
       if (c.session && typeof c.session.guardStatus === 'function') c.createSession();
     });
+    if (state.crewUI) require('../crew-backend').restartAll(c => typeof c.session.guardStatus === 'function');
     return true;
   });
 

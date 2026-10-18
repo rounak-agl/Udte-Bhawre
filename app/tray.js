@@ -33,7 +33,7 @@ const providerMenuLabel = (p) => (p.kind === 'ollama' ? `${p.name} (local)` : p.
 
 /** The tray menu. Each bot has its own submenu: visibility and its own provider. */
 function trayMenuTemplate() {
-  if (process.env.CREW_UI === '1') return require('./crew-ui').trayTemplate();
+  if (state.crewUI) return require('./crew-ui').trayTemplate();
   const { characters } = state;
   const allProviders = listProviders();
   const defaultKey = defaultProviderKey();

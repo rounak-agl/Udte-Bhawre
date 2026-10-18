@@ -1,0 +1,393 @@
+/* Settings → Keys / ArmorIQ / About, and the Connections page (Installed, Browse, Add your own) */
+
+.secrets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+}
+.secrets__note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.secrets__note svg,
+.secrets__h svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.5;
+  flex: none;
+}
+.secrets__group {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--rule);
+}
+.secrets__h {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  border-bottom: 1px solid var(--rule);
+}
+.secret {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+.secret + .secret {
+  border-top: 1px solid var(--rule-soft);
+}
+.secret__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.secret__head b {
+  font-weight: 500;
+}
+.secret__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.secret__row input,
+.inp textarea,
+.browse__search input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-2);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.secret__row input {
+  height: 28px;
+  padding: 0 var(--space-2);
+}
+.inp textarea {
+  padding: var(--space-2);
+  resize: vertical;
+  line-height: 1.5;
+}
+.secret__row input:focus,
+.inp textarea:focus,
+.browse__search input:focus {
+  outline: 0;
+  border-color: var(--text);
+}
+
+.armor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--up);
+  padding-bottom: var(--space-4);
+}
+.armor > .field__hint,
+.armor__test,
+.armor__facts {
+  margin: 0 var(--space-4);
+}
+.armor .secret {
+  border-top: 1px solid var(--rule-soft);
+  border-bottom: 1px solid var(--rule-soft);
+}
+.armor__head {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) 0;
+}
+.armor__head > svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.5;
+}
+.armor__head span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.armor__head b {
+  font-weight: 500;
+}
+.armor code,
+.armor__facts code,
+.tools__list code {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+}
+.armor__test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.armor__facts {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+}
+.armor__fact {
+  display: contents;
+}
+.armor__facts dt {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  padding-top: 2px;
+}
+.armor__facts dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.armor__facts dd code {
+  padding: 1px 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-2);
+}
+
+/* ── Connections ── */
+.page__head .seg {
+  align-self: flex-start;
+}
+.conn__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.conn__emoji {
+  display: inline-flex;
+  align-items: center;
+  font-size: 18px;
+  line-height: 1;
+}
+.conn__desc {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.browse__bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.browse__search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.browse__search svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+.browse__search input {
+  height: 32px;
+  padding: 0 var(--space-3);
+  font-family: var(--sans);
+  font-size: var(--text-sm);
+}
+.browse__h {
+  margin-top: var(--space-5, 24px);
+}
+
+.servers {
+  margin-top: var(--space-3);
+}
+.server {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--rule);
+}
+.server__main {
+  display: grid;
+  grid-template-columns: 24px 1fr auto auto;
+  align-items: center;
+  gap: var(--space-3);
+}
+.server__icon {
+  display: inline-flex;
+  justify-content: center;
+  font-size: 18px;
+}
+.server__icon svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.5;
+}
+.server__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.server__name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-weight: 500;
+}
+.server__sum {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.server__actions {
+  display: flex;
+  gap: var(--space-1, 4px);
+}
+.server > .tools,
+.server > .cloudkey__msg,
+.server > .field__hint {
+  margin-left: calc(24px + var(--space-3));
+}
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.tools__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1, 4px);
+}
+.tools__list code {
+  padding: 1px 6px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-2);
+}
+.pre {
+  white-space: pre-wrap;
+}
+
+.custom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 640px;
+  margin-top: var(--space-3);
+}
+.custom__paste {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--rule);
+}
+.inp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1, 4px);
+  width: 100%;
+}
+.inp__label {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.warnbox {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--attention);
+  border-left-width: 3px;
+  font-size: var(--text-sm);
+}
+.warnbox code {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.warnbox a,
+.inp a,
+.field__hint a {
+  color: inherit;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Modal sheet (install / edit) */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  background: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+.sheet__box {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-3, 10px);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.25);
+}
+.sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--rule);
+}
+.sheet__head h2 {
+  font-size: var(--text-lg);
+  font-weight: 500;
+}
+.sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+.sheet__body .custom {
+  margin-top: 0;
+}
+.sheet__by {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.sheet__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+}

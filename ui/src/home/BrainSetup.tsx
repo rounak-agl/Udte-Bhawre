@@ -15,7 +15,8 @@ const DEMO: LocalStatus = {
 
 const gb = (n: number) => `${(n / 1e9).toFixed(1)} GB`;
 
-export function BrainSetup({ onReady }: { onReady?: () => void }) {
+/** `cloud={false}` hides the Gemini key box (Settings has every key under Keys). */
+export function BrainSetup({ onReady, cloud = true }: { onReady?: () => void; cloud?: boolean }) {
   const [local, setLocal] = useState<LocalStatus | null>(bridge ? null : DEMO);
   const [hasKey, setHasKey] = useState(false);
   const [key, setKey] = useState("");
@@ -107,6 +108,7 @@ export function BrainSetup({ onReady }: { onReady?: () => void }) {
           </ul>
         )}
       </section>
+      {cloud && (
       <section className="cloudkey">
         <div className="cloudkey__head">
           <Cloud />
@@ -122,6 +124,7 @@ export function BrainSetup({ onReady }: { onReady?: () => void }) {
         </div>
         {keyMsg && <p className={`cloudkey__msg ${keyMsg.ok ? "is-ok" : "is-bad"}`}>{keyMsg.text}</p>}
       </section>
+      )}
     </div>
   );
 }

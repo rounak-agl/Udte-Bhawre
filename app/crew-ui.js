@@ -165,6 +165,11 @@ function openHome() {
   windows.home = win;
 }
 
+/** Whether IPC came from Home base, the crew's settings window (see requireControlCentre). */
+function isHomeSender(event) {
+  return !!(windows.home && !windows.home.isDestroyed() && event.sender === windows.home.webContents);
+}
+
 function all() {
   return Object.values(windows).filter((w) => w && !w.isDestroyed());
 }
@@ -242,4 +247,4 @@ function trayTemplate() {
   ];
 }
 
-module.exports = { registerCrewIpc, startCrewUI, openHome, trayTemplate };
+module.exports = { registerCrewIpc, startCrewUI, openHome, trayTemplate, isHomeSender };

@@ -118,6 +118,8 @@ function createHarness() {
     ipcOn, ipcHandle, sent, windows, db, sentTo,
     lastWindow: () => windows[windows.length - 1],
     async load() {
+      // These tests cover the classic Control Centre and 2D bots, not the default 3D crew
+      process.env.CREW_UI = '0';
       this.main = await quiet(() => require(path.join(REPO, 'main.js')));
       return this.main;
     },

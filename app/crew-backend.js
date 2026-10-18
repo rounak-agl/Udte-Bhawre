@@ -221,10 +221,17 @@ function addLocal(model) {
 
 function setGeminiKey(key) {
   const k = String(key || '').trim();
-  if (!/^[\w-]{20,200}$/.test(k)) return { ok: false, error: 'That does not look like a Gemini key.' };
+  if (!/^[\w.-]{20,200}$/.test(k)) return { ok: false, error: 'That does not look like a Gemini key.' };
   setApiKey(k);
   for (const char of chars.values()) if (char.session) char.createSession();
   return { ok: true };
+}
+
+/** New sessions for crew members that have one (and match `which`), e.g. after a key change. */
+function restartAll(which = () => true) {
+  for (const char of chars.values()) {
+    if (char.session && which(char)) char.createSession();
+  }
 }
 
 function setSink(fn) {
@@ -237,4 +244,4 @@ function shutdown() {
   }
 }
 
-module.exports = { send, decide, stop, setProvider, overview, setSink, shutdown, detectLocal, addLocal, setGeminiKey };
+module.exports = { send, decide, stop, setProvider, overview, setSink, shutdown, detectLocal, addLocal, setGeminiKey, restartAll };

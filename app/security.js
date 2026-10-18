@@ -1,10 +1,15 @@
 const { dialog, shell } = require('electron');
 const { isControlCentreSender } = require('./control-centre');
 
-/** Reject privileged IPC that doesn't come from the Control Centre window. */
+/**
+ * Reject privileged IPC (keys, database, connectors) unless it comes from a settings
+ * window: the classic Control Centre or the crew's Home base.
+ */
 function requireControlCentre(event, channel) {
   if (isControlCentreSender(event)) return true;
-  console.warn(`[IPC] Rejected "${channel}" from a non-Control-Centre window`);
+  // Required here, not at load: crew-ui pulls in modules that require this one
+  if (require('./crew-ui').isHomeSender(event)) return true;
+  console.warn(`[IPC] Rejected "${channel}" from a non-settings window`);
   return false;
 }
 
