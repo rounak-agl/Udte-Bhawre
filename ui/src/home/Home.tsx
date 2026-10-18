@@ -357,7 +357,7 @@ function Threads({ onOpenCrew, world }: { onOpenCrew: (id: CrewId) => void; worl
             return (
               <li key={c.id} className="row rise" style={{ "--c": c.color, "--i": i } as CSSProperties}>
                 <CrewFace id={c.id} color={c.color} size={26} />
-                <span className="row__t">{firstAsk(x.msgs).slice(0, 90) || "Untitled"}</span>
+                <span className="row__t">{firstAsk(x.msgs) || "Untitled"}</span>
                 <span className="eyebrow">
                   {c.name} · {asks} {asks === 1 ? "ask" : "asks"}
                 </span>

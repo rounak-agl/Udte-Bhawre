@@ -182,7 +182,7 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
         {empty && (
           <div className="starters">
             {crew.starters.map((s, i) => (
-              <button key={s} type="button" className="starter rise" style={{ "--i": i } as CSSProperties} onClick={() => submit(s)}>
+              <button key={s} type="button" className="starter rise" style={{ "--i": i } as CSSProperties} onClick={() => onSend(s)}>
                 {s}
               </button>
             ))}
@@ -201,11 +201,11 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
         <div className={`composer ${text || files.length ? "has-text" : ""}`}>
           {files.length > 0 && (
             <div className="composer__files">
-              {files.map((f) => (
-                <span key={f.name} className="file-chip">
+              {files.map((f, i) => (
+                <span key={`${f.name}-${i}`} className="file-chip">
                   <Paperclip />
                   {f.name}
-                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((x) => x.filter((y) => y !== f))}>
+                  <button type="button" aria-label={`Remove ${f.name}`} onClick={() => setFiles((x) => x.filter((_, j) => j !== i))}>
                     <X />
                   </button>
                 </span>
@@ -223,7 +223,7 @@ export function Desk({ crewId, live, mode, pinned, onMode, onClose, onSend, onDe
               e.target.style.height = `${Math.min(160, e.target.scrollHeight)}px`;
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 submit();
               }

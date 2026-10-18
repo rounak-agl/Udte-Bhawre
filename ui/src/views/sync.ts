@@ -2,6 +2,9 @@ import { useEffect } from "react";
 import { bridge, type BusMsg } from "../lib/bridge";
 import { sim, type World } from "../sim/store";
 import { keepHistory, loadHistory } from "../sim/history";
+import { CREW } from "../crew/roster";
+
+const known = (id: unknown) => CREW.some((c) => c.id === id);
 
 export function useStageSync() {
   useEffect(() => {
@@ -25,11 +28,11 @@ export function useStageSync() {
     const offBackend = bridge.onBackend((e) => sim.backend(e));
     const offBus = bridge.on((m: BusMsg) => {
       if (m.type === "hello") push();
-      if (m.type !== "action") return;
+      if (m.type !== "action" || !known(m.id)) return;
       if (m.name === "send") sim.send(m.id, m.text, m.files);
       else if (m.name === "decide") sim.decide(m.id, m.planId, m.ok);
       else if (m.name === "summon") sim.summon(m.id);
-      else if (m.name === "retry") sim.send(m.id);
+      else if (m.name === "retry") sim.retry(m.id);
       else if (m.name === "wake") sim.dismissPeek(m.id);
       else if (m.name === "stop") sim.stop(m.id);
       else if (m.name === "refresh") void refresh();

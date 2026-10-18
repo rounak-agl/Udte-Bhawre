@@ -102,12 +102,42 @@ function Tools({ m }: { m: Extract<Msg, { kind: "tools" }> }) {
   );
 }
 
+function scroller(el: HTMLElement | null) {
+  for (let p = el?.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY;
+    if (o === "auto" || o === "scroll") return p;
+  }
+  return null;
+}
+
 export function Thread({ msgs, crew, onDecide, onRetry }: { msgs: Msg[]; crew: Crew; onDecide: (id: string, ok: boolean) => void; onRetry?: () => void }) {
   const end = useRef<HTMLDivElement>(null);
+  const pinned = useRef(true);
+  const count = useRef(0);
   const last = msgs[msgs.length - 1];
-  const sig = last ? `${msgs.length}:${last.kind === "text" ? last.text.length : ""}` : "";
+  const sig = last ? `${msgs.length}:${last.kind === "text" ? last.text.length : last.kind === "tools" ? last.items.map((t) => t.status).join() : last.kind === "plan" ? last.status : ""}` : "";
   useEffect(() => {
-    end.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    const box = scroller(end.current);
+    if (!box) return;
+    const onScroll = () => {
+      pinned.current = box.scrollHeight - box.scrollTop - box.clientHeight < 120;
+    };
+    box.addEventListener("scroll", onScroll, { passive: true });
+    const ro = new ResizeObserver(() => {
+      if (pinned.current) box.scrollTop = box.scrollHeight;
+    });
+    if (box.firstElementChild) ro.observe(box.firstElementChild);
+    ro.observe(box);
+    return () => {
+      box.removeEventListener("scroll", onScroll);
+      ro.disconnect();
+    };
+  }, []);
+  useEffect(() => {
+    const grew = msgs.length !== count.current;
+    count.current = msgs.length;
+    if (!pinned.current && last?.kind !== "user") return;
+    end.current?.scrollIntoView({ block: "end", behavior: grew ? "smooth" : "auto" });
   }, [sig]);
   return (
     <div className="thread">
@@ -137,10 +167,11 @@ export function Thread({ msgs, crew, onDecide, onRetry }: { msgs: Msg[]; crew: C
               <section className="oops-card" role="alert">
                 <p className="oops-card__title">{m.title}</p>
                 <p className="oops-card__body">{m.body}</p>
-                <div className="plan__actions">
-                  <Button variant="ink" size="sm" icon={<RefreshCw />} label="Reconnect Gmail" onClick={onRetry} />
-                  <Button size="sm" label="Not now" />
-                </div>
+                {onRetry && i === msgs.length - 1 && !m.title.startsWith("Blocked") && (
+                  <div className="plan__actions">
+                    <Button variant="ink" size="sm" icon={<RefreshCw />} label="Try again" onClick={onRetry} />
+                  </div>
+                )}
               </section>
             )}
           </div>

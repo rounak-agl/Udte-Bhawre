@@ -2,6 +2,10 @@ const path = require('path');
 const { app, BrowserWindow, ipcMain, screen, nativeTheme } = require('electron');
 const { ROOT } = require('./paths');
 const backend = require('./crew-backend');
+const appEvents = require('./events');
+
+const MODES = new Set(['popover', 'panel', 'focus']);
+const point = (a) => a && Number.isFinite(a.x) && Number.isFinite(a.y);
 
 const PRELOAD = path.join(ROOT, 'preload-crew.js');
 const DEV_URL = process.env.CREW_UI_DEV || '';
@@ -45,9 +49,12 @@ function workArea() {
 }
 
 function refitStage() {
-  if (!windows.stage || windows.stage.isDestroyed()) return;
-  const wa = workArea();
-  windows.stage.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height });
+  if (windows.stage && !windows.stage.isDestroyed()) {
+    const wa = workArea();
+    windows.stage.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height });
+  }
+  if (windows.desk && !windows.desk.isDestroyed()) windows.desk.setBounds(deskBounds(deskMode, deskAnchor));
+  appEvents.emit('settings-changed');
 }
 
 function moveCrewTo(id) {
@@ -85,16 +92,20 @@ function createStage() {
 
 function deskBounds(mode, anchor) {
   const wa = workArea();
-  if (mode === 'panel') return { x: wa.x + wa.width - 492, y: wa.y + 12, width: 480, height: wa.height - 120 };
+  if (mode === 'panel') {
+    const width = Math.min(480, wa.width - 24);
+    return { x: wa.x + wa.width - width - 12, y: wa.y + 12, width, height: Math.max(380, wa.height - 120) };
+  }
   if (mode === 'focus') {
-    const width = Math.min(1120, wa.width - 80);
-    const height = Math.min(760, wa.height - 60);
+    const width = Math.max(320, Math.min(1120, wa.width - 80));
+    const height = Math.max(380, Math.min(760, wa.height - 60));
     return { x: Math.round(wa.x + (wa.width - width) / 2), y: Math.round(wa.y + (wa.height - height) / 2), width, height };
   }
   const width = 400;
-  const height = Math.max(380, Math.min(560, anchor.y - wa.y - 28));
-  const x = Math.max(wa.x + 12, Math.min(wa.x + wa.width - width - 84, Math.round(anchor.x - width / 2)));
-  const y = Math.max(wa.y + 12, Math.round(anchor.y - height - 16));
+  const at = point(anchor) ? anchor : { x: wa.x + wa.width - 200, y: wa.y + wa.height - 40 };
+  const height = Math.max(380, Math.min(560, at.y - wa.y - 28));
+  const x = Math.max(wa.x + 12, Math.min(wa.x + wa.width - width - 84, Math.round(at.x - width / 2)));
+  const y = Math.max(wa.y + 12, Math.min(wa.y + wa.height - height - 12, Math.round(at.y - height - 16)));
   return { x, y, width, height };
 }
 
@@ -182,11 +193,12 @@ function registerCrewIpc() {
     if (windows.stage && !windows.stage.isDestroyed()) windows.stage.setIgnoreMouseEvents(!on, { forward: true });
   });
   ipcMain.on('crew:open-desk', (_e, crewId, anchor) => {
+    if (!backend.isCrew(crewId)) return;
     const wa = workArea();
-    openDesk(crewId, anchor ? { x: wa.x + anchor.x, y: wa.y + anchor.y } : null);
+    openDesk(crewId, point(anchor) ? { x: wa.x + anchor.x, y: wa.y + anchor.y } : null);
   });
   ipcMain.on('crew:desk-mode', (_e, mode) => {
-    if (!windows.desk || windows.desk.isDestroyed()) return;
+    if (!MODES.has(mode) || !windows.desk || windows.desk.isDestroyed()) return;
     deskMode = mode;
     windows.desk.setBounds(deskBounds(mode, deskAnchor), true);
   });
