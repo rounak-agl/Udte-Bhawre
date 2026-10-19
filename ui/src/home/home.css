@@ -217,7 +217,12 @@
   min-width: 0;
 }
 .need__t {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   font-size: var(--text-md);
+  overflow-wrap: anywhere;
 }
 .did {
   display: grid;

@@ -77,6 +77,7 @@ function askApproval(id, message) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       approvals.delete(planId);
+      emit(id, 'crew-approval-expired', [{ planId }]);
       resolve(false);
     }, APPROVAL_TIMEOUT_MS);
     approvals.set(planId, (ok) => {
@@ -127,14 +128,24 @@ function cleanImages(raw) {
     .map((i) => ({ mimeType: i.mimeType, data: i.data }));
 }
 
+function isCrew(id) {
+  return typeof id === 'string' && Object.prototype.hasOwnProperty.call(CREW, id);
+}
+
 function send(id, text, rawImages) {
-  const char = getChar(id);
-  const images = cleanImages(rawImages);
+  if (!isCrew(id)) return;
   const fail = (msg) => {
     emit(id, 'chat-error', [msg]);
     emit(id, 'chat-turn-complete', []);
   };
-  if (char.orchestration.isRunning()) return fail('Still working on the last job. Try again when it finishes.');
+  let char;
+  try {
+    char = getChar(id);
+  } catch (err) {
+    return fail(err.message || String(err));
+  }
+  const images = cleanImages(rawImages);
+  if (char.orchestration.isRunning()) return emit(id, 'chat-busy', ['Still working on the last job. Send that again when it finishes.']);
   if (images.length && !getProviderInfo(char.provider)?.supportsImages) return fail('This brain cannot read images. Pick another one in the model menu.');
   try {
     if (!char.session) char.createSession();
@@ -147,6 +158,7 @@ function send(id, text, rawImages) {
 }
 
 function decide(planId, ok) {
+  if (typeof planId !== 'string') return;
   const done = approvals.get(planId);
   if (done) done(ok);
 }
@@ -162,7 +174,7 @@ function stop(id) {
 }
 
 function setProvider(id, key) {
-  if (!CREW[id] || !isKnownProvider(key)) return false;
+  if (!isCrew(id) || !isKnownProvider(key)) return false;
   const cfg = readConfig();
   cfg.providers = { ...(cfg.providers || {}), [id]: key };
   writeConfig(cfg);
@@ -244,4 +256,4 @@ function shutdown() {
   }
 }
 
-module.exports = { send, decide, stop, setProvider, overview, setSink, shutdown, detectLocal, addLocal, setGeminiKey, restartAll };
+module.exports = { isCrew, send, decide, stop, setProvider, overview, setSink, shutdown, detectLocal, addLocal, setGeminiKey, restartAll };

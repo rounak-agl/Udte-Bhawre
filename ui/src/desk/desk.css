@@ -349,6 +349,8 @@
   max-width: 82%;
 }
 .msg__user p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 9px 13px;
   border-radius: var(--radius-3) var(--radius-3) var(--radius-1) var(--radius-3);
   background: var(--rule-soft);
@@ -357,6 +359,8 @@
   white-space: pre-wrap;
 }
 .msg__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-size: var(--text-md);
   line-height: 1.55;
   white-space: pre-wrap;
@@ -1030,10 +1034,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+  min-width: 0;
   max-width: 64ch;
   font-size: var(--text-md);
   line-height: 1.55;
   text-wrap: pretty;
+  overflow-wrap: anywhere;
 }
 .rich p,
 .rich ul,
@@ -1071,7 +1077,8 @@
   font-family: var(--mono);
   font-size: var(--text-xs);
   line-height: 1.5;
-  white-space: pre-wrap;
+  white-space: pre;
+  overflow-wrap: normal;
 }
 .rich .card {
   max-width: none;
