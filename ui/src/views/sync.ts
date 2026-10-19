@@ -4,19 +4,23 @@ import { sim, type World } from "../sim/store";
 import { keepHistory, loadHistory } from "../sim/history";
 import { CREW } from "../crew/roster";
 
+const MIRROR_MS = 66;
+
 const known = (id: unknown) => CREW.some((c) => c.id === id);
 
 export function useStageSync() {
   useEffect(() => {
     if (!bridge) return;
-    let queued = false;
+    let timer = 0;
+    let sent = 0;
+    const flush = () => {
+      timer = 0;
+      sent = performance.now();
+      bridge!.post({ type: "world", world: sim.snapshot() });
+    };
     const push = () => {
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
-        bridge!.post({ type: "world", world: sim.snapshot() });
-      });
+      if (timer) return;
+      timer = window.setTimeout(flush, Math.max(0, MIRROR_MS - (performance.now() - sent)));
     };
     const off = sim.subscribe(push);
     const live = new URLSearchParams(location.search).get("sim") !== "1";
@@ -40,6 +44,7 @@ export function useStageSync() {
       else if (m.name === "brain") void bridge!.setProvider(m.id, m.key).then(refresh);
     });
     return () => {
+      clearTimeout(timer);
       off();
       offHistory();
       offBus();

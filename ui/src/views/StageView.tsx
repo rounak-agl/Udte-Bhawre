@@ -67,6 +67,8 @@ export default function StageView() {
       <ToyStage
         toys={[...toys, ...minis]}
         float
+        band={160}
+        maxPixelRatio={1.5}
         onHoverChange={(k) => {
           hover.current = k;
           (window as Window & { __crewSync?: () => void }).__crewSync?.();
