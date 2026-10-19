@@ -1,64 +1,104 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Database, Eye, EyeOff, KeyRound, Lock, Mic, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button, IconButton, Status } from "../components/ui";
 import { bridge, type AppInfo, type ArmorTest, type KeyProvider, type SecurityOverview } from "../lib/bridge";
+import { Failed, Pending, failText, refreshCrew, useAlive, type Load } from "./settings-ui";
 
-type Msg = { ok: boolean; text: string } | null;
+type Msg = { ok: boolean; text: string };
 
-/** A hidden secret with show/hide and Save. `save` returns the message to show under it. */
-function SecretRow({ label, hint, placeholder, load, save }: { label: string; hint?: ReactNode; placeholder?: string; load: () => Promise<string>; save: (v: string) => Promise<Msg> }) {
+/** Enough of a saved secret to recognise it, never the whole thing. */
+function mask(v: string) {
+  const uri = /^([a-z][\w+.-]*:\/\/)(?:([^@/?#]*)@)?([^?#]*)/i.exec(v);
+  if (uri) return `${uri[1]}${uri[2] ? "•••@" : ""}${uri[3]}${uri[0].length < v.length ? "?…" : ""}`;
+  return v.length > 12 ? `${v.slice(0, 4)}…${v.slice(-4)}` : "••••••••";
+}
+
+/**
+ * A saved secret shown masked, with a field to replace it and Remove.
+ * `save` resolves with the message to show (stored) or throws (not stored).
+ */
+function SecretRow({ label, hint, placeholder, maxLength, load, save }: { label: string; hint?: ReactNode; placeholder?: string; maxLength?: number; load: () => Promise<string>; save: (v: string) => Promise<Msg> }) {
+  const alive = useAlive();
+  const [saved, setSaved] = useState<Load<string>>({ state: "loading" });
   const [value, setValue] = useState("");
-  const [saved, setSaved] = useState("");
   const [shown, setShown] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<Msg>(null);
-  useEffect(() => {
-    load()
-      .then((v) => {
-        setValue(v || "");
-        setSaved(v || "");
-      })
-      .catch(() => {});
-  }, []);
-  const dirty = value.trim() !== saved;
-  const submit = async () => {
-    if (busy || !dirty) return;
+  const [msg, setMsg] = useState<Msg | null>(null);
+  const pending = useRef(false);
+
+  const fetchSaved = () => {
+    setSaved({ state: "loading" });
+    load().then(
+      (v) => alive.current && setSaved({ state: "ready", data: v ? mask(v) : "" }),
+      (err) => alive.current && setSaved({ state: "error", text: failText(err, `Could not read the saved ${label} value.`) }),
+    );
+  };
+  useEffect(() => fetchSaved(), []);
+
+  const submit = async (v: string) => {
+    if (pending.current) return;
+    pending.current = true;
     setBusy(true);
     setMsg(null);
     try {
-      const v = value.trim();
-      setMsg(await save(v));
-      setSaved(v);
+      const m = await save(v);
+      if (!alive.current) return;
+      setMsg(m);
+      setSaved({ state: "ready", data: v ? mask(v) : "" });
+      setValue("");
+      setShown(false);
     } catch (err) {
-      setMsg({ ok: false, text: err instanceof Error ? err.message : "Could not save." });
+      if (alive.current) setMsg({ ok: false, text: failText(err, "Could not save.") });
     } finally {
-      setBusy(false);
+      pending.current = false;
+      if (alive.current) setBusy(false);
     }
   };
+  const next = value.trim();
+  const isSet = saved.state === "ready" && !!saved.data;
+  const remove = () => {
+    if (window.confirm(`Remove the saved ${label} value?`)) void submit("");
+  };
+
   return (
     <div className="secret">
       <div className="secret__head">
         <b>{label}</b>
-        {saved ? <Status tone="done">Set</Status> : <span className="eyebrow">Not set</span>}
+        {saved.state === "loading" ? <span className="eyebrow">Checking</span> : saved.state === "error" ? <span className="eyebrow">Unknown</span> : isSet ? <Status tone="done">Set</Status> : <span className="eyebrow">Not set</span>}
       </div>
+      {saved.state === "error" && <Failed text={saved.text} onRetry={fetchSaved} />}
+      {saved.state === "ready" && saved.data && (
+        <div className="secret__saved">
+          <code className="secret__mask" title="Saved value, masked">
+            {saved.data}
+          </code>
+          <Button variant="ghost" size="sm" label="Remove" disabled={busy} onClick={remove} />
+        </div>
+      )}
       <div className="secret__row">
         <input
           type={shown ? "text" : "password"}
           value={value}
-          placeholder={placeholder}
+          placeholder={isSet ? "Paste a new value to replace it" : placeholder}
           aria-label={label}
           autoComplete="off"
           spellCheck={false}
+          maxLength={maxLength}
+          disabled={busy}
           onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && void submit()}
+          onKeyDown={(e) => e.key === "Enter" && next && void submit(next)}
         />
         <IconButton label={shown ? "Hide" : "Show"} onClick={() => setShown((s) => !s)}>
           {shown ? <EyeOff /> : <Eye />}
         </IconButton>
-        <Button variant="ink" size="sm" label={busy ? "Saving" : "Save"} disabled={busy || !dirty} onClick={() => void submit()} />
+        <Button variant="ink" size="sm" label={busy ? "Saving" : isSet ? "Replace" : "Save"} disabled={busy || !next} onClick={() => next && void submit(next)} />
       </div>
       {hint && <p className="field__hint">{hint}</p>}
-      {msg && <p className={`cloudkey__msg ${msg.ok ? "is-ok" : "is-bad"}`}>{msg.text}</p>}
+      {msg && (
+        <p className={`cloudkey__msg ${msg.ok ? "is-ok" : "is-bad"}`} role={msg.ok ? "status" : "alert"}>
+          {msg.text}
+        </p>
+      )}
     </div>
   );
 }
@@ -70,24 +110,38 @@ const PROVIDER_KEYS: { provider: KeyProvider; label: string; placeholder: string
   { provider: "copilot", label: "Copilot (GitHub)", placeholder: "github_pat_… / ghp_…", hint: "Optional. Leave empty to use your GitHub CLI login." },
 ];
 
-const refreshCrew = () => bridge?.post({ type: "action", name: "refresh", id: "bo" });
+const KEYCHAIN_BY_BACKEND: Record<string, string> = { gnome_libsecret: "GNOME Keyring", kwallet: "KWallet", kwallet5: "KWallet", kwallet6: "KWallet" };
+const KEYCHAIN_BY_PLATFORM: Record<string, string> = { darwin: "macOS Keychain", win32: "Windows Data Protection" };
+
+function storageNote(st: { encrypted: boolean; backend?: string; platform?: string }) {
+  if (!st.encrypted) return "No system keychain found, so keys are stored unencrypted (only your user can read the file).";
+  const name = KEYCHAIN_BY_BACKEND[st.backend ?? ""] ?? KEYCHAIN_BY_PLATFORM[st.platform ?? ""] ?? "your system keychain";
+  return `Keys, tokens and the database address are encrypted on this computer with ${name}.`;
+}
 
 /** Brain keys, voice and database: everything the classic Settings → General page had. */
 export function KeysPanel() {
   const s = bridge?.settings;
-  const [storage, setStorage] = useState<string>("");
-  // One fetch shared by the four key rows
-  const [keys] = useState(() => s?.providerKeys() ?? Promise.resolve({} as Partial<Record<KeyProvider, string>>));
+  const alive = useAlive();
+  const [storage, setStorage] = useState("");
+  const keys = useRef<Promise<Partial<Record<KeyProvider, string>>> | null>(null);
   useEffect(() => {
-    s?.secretStorage()
-      .then((st) => {
-        if (!st) return;
-        const name = { gnome_libsecret: "GNOME Keyring", kwallet: "KWallet", kwallet5: "KWallet", kwallet6: "KWallet" }[st.backend ?? ""] ?? { darwin: "macOS Keychain", win32: "Windows Data Protection" }[st.platform ?? ""] ?? "your system keychain";
-        setStorage(st.encrypted ? `Keys, tokens and the database address are encrypted on this computer with ${name}.` : "No system keychain found, so keys are stored unencrypted (only your user can read the file).");
-      })
-      .catch(() => {});
+    s?.secretStorage().then(
+      (st) => alive.current && setStorage(st ? storageNote(st) : ""),
+      (err) => alive.current && setStorage(failText(err, "Could not check how keys are stored on this computer.")),
+    );
   }, []);
   if (!s) return <p className="field__hint">Keys can be set in the desktop app.</p>;
+
+  // One fetch shared by the four key rows; a failed one is dropped so Try again refetches
+  const providerKey = (provider: KeyProvider) => {
+    keys.current ??= s.providerKeys().catch((err: unknown) => {
+      keys.current = null;
+      throw err;
+    });
+    return keys.current.then((all) => all[provider] ?? "");
+  };
+
   return (
     <div className="secrets">
       {storage && (
@@ -105,9 +159,11 @@ export function KeysPanel() {
             label={k.label}
             placeholder={k.placeholder}
             hint={k.hint}
-            load={() => keys.then((all) => all[k.provider] ?? "")}
+            maxLength={1000}
+            load={() => providerKey(k.provider)}
             save={async (v) => {
               s.setProviderKey(k.provider, v);
+              keys.current = null;
               refreshCrew();
               return { ok: true, text: v ? `${k.label} key saved. Crew members using it start fresh with the new key.` : `${k.label} key removed.` };
             }}
@@ -136,6 +192,7 @@ export function KeysPanel() {
           label="MongoDB address"
           placeholder="mongodb://localhost:27017/assistant"
           hint="Keeps sub-agent tasks and team memory. Saving connects right away."
+          maxLength={2000}
           load={() => s.mongodbUri()}
           save={async (v) => {
             const r = await s.setMongodbUri(v);
@@ -149,33 +206,57 @@ export function KeysPanel() {
   );
 }
 
-const TEST_ICON: Record<ArmorTest["state"], string> = { ok: "Connected", off: "Off", invalid: "Key rejected", unreachable: "Can't reach ArmorIQ", error: "Problem" };
+const TEST_LABEL: Record<ArmorTest["state"], string> = { ok: "Connected", off: "Off", invalid: "Key rejected", unreachable: "Can't reach ArmorIQ", error: "Problem" };
 
 /** The ArmorIQ guard: key, connection test and what the policy blocks (classic Security page). */
 export function ArmorPanel() {
   const s = bridge?.settings;
-  const [sec, setSec] = useState<SecurityOverview | null>(null);
+  const alive = useAlive();
+  const [sec, setSec] = useState<Load<SecurityOverview>>({ state: "loading" });
   const [test, setTest] = useState<ArmorTest | "busy" | null>(null);
-  const load = () => s?.security().then(setSec).catch(() => {});
-  useEffect(() => {
-    void load();
-  }, []);
-  const runTest = async () => {
-    if (!s || test === "busy") return;
-    setTest("busy");
-    setTest((await s.testArmorIQ()) ?? null);
+  const testing = useRef(false);
+
+  const loadSec = async () => {
+    if (!s) return;
+    setSec((cur) => (cur.state === "ready" ? cur : { state: "loading" }));
+    try {
+      const data = await s.security();
+      if (alive.current) setSec(data ? { state: "ready", data } : { state: "error", text: "Security details are not available in this window." });
+    } catch (err) {
+      if (alive.current) setSec({ state: "error", text: failText(err, "Could not load the security details.") });
+    }
   };
+  useEffect(() => {
+    void loadSec();
+  }, []);
+
+  const runTest = async () => {
+    if (!s || testing.current) return;
+    testing.current = true;
+    setTest("busy");
+    let r: ArmorTest;
+    try {
+      r = (await s.testArmorIQ()) ?? { state: "error", message: "The test is not available in this window." };
+    } catch (err) {
+      r = { state: navigator.onLine ? "error" : "unreachable", message: failText(err, "The test did not finish.") };
+    }
+    testing.current = false;
+    if (alive.current) setTest(r);
+  };
+
   if (!s) return <p className="field__hint">ArmorIQ can be set up in the desktop app.</p>;
+  const guard = sec.state === "ready" ? sec.data.guard : null;
   return (
     <div className="armor">
       <div className="armor__head">
         <ShieldCheck />
         <span>
           <b>ArmorIQ guard</b>
-          <span className="eyebrow">{sec?.guard.active ? `On · key from ${sec.guard.keySource}` : "Off · add a key to turn it on"}</span>
+          <span className="eyebrow">{!guard ? (sec.state === "loading" ? "Checking" : "Status unknown") : guard.active ? `On · key from ${guard.keySource ?? "an unknown source"}` : "Off · add a key to turn it on"}</span>
         </span>
-        {sec && (sec.guard.active ? <Status tone="live">On</Status> : <Status tone="waiting">Off</Status>)}
+        {guard && (guard.active ? <Status tone="live">On</Status> : <Status tone="waiting">Off</Status>)}
       </div>
+      {sec.state === "error" && <Failed text={sec.text} onRetry={() => void loadSec()} />}
       <p className="field__hint">
         Before a crew member uses a tool, ArmorIQ seals the actions it may take for that message and blocks anything else, such as <code>sudo</code> or <code>rm -rf</code>. If ArmorIQ cannot be reached,
         each action asks for your OK instead.
@@ -183,36 +264,38 @@ export function ArmorPanel() {
       <SecretRow
         label="ArmorIQ API key"
         placeholder="ak_live_…"
-        hint={sec?.guard.envOverride ? "The ARMORIQ_API_KEY environment variable is set and wins over this field." : "From your ArmorIQ dashboard. Stored encrypted."}
+        hint={guard?.envOverride ? "The ARMORIQ_API_KEY environment variable is set and wins over this field." : "From your ArmorIQ dashboard. Stored encrypted."}
+        maxLength={500}
         load={() => s.armorIQKey()}
         save={async (v) => {
-          await s.setArmorIQKey(v);
-          await load();
+          if (!(await s.setArmorIQKey(v))) throw new Error("The key was not accepted. It can be at most 500 characters.");
+          await loadSec();
           if (v) void runTest();
+          else setTest(null);
           return { ok: true, text: v ? "ArmorIQ key saved." : "ArmorIQ key removed. The guard is off." };
         }}
       />
       <div className="armor__test">
         <Button size="sm" label={test === "busy" ? "Testing" : "Test connection"} icon={<RefreshCw />} disabled={test === "busy"} onClick={() => void runTest()} />
         {test && test !== "busy" && (
-          <span className={`cloudkey__msg ${test.state === "ok" ? "is-ok" : "is-bad"}`}>
-            {TEST_ICON[test.state]}: {test.message}
+          <span className={`cloudkey__msg ${test.state === "ok" ? "is-ok" : "is-bad"}`} role="status">
+            {TEST_LABEL[test.state]}: {test.message}
           </span>
         )}
       </div>
-      {sec && (
+      {sec.state === "ready" && (
         <dl className="armor__facts">
           <dt>Always blocked</dt>
-          <dd>{sec.policy.deny.length ? sec.policy.deny.map((t) => <code key={t}>{t}</code>) : "Nothing"}</dd>
+          <dd>{sec.data.policy.deny.length ? sec.data.policy.deny.map((t) => <code key={t}>{t}</code>) : "Nothing"}</dd>
           <dt>Allowed tools</dt>
-          <dd>{sec.policy.allow.length ? sec.policy.allow.map((t) => <code key={t}>{t}</code>) : "All tools (no allow list)"}</dd>
+          <dd>{sec.data.policy.allow.length ? sec.data.policy.allow.map((t) => <code key={t}>{t}</code>) : "All tools (no allow list)"}</dd>
           <dt>Asks first</dt>
-          <dd>{sec.approvalTools.length ? sec.approvalTools.map((t) => <code key={t}>{t}</code>) : "Nothing"}</dd>
+          <dd>{sec.data.approvalTools.length ? sec.data.approvalTools.map((t) => <code key={t}>{t}</code>) : "Nothing"}</dd>
           <dt>Files</dt>
-          <dd>{sec.fileAccess}</dd>
+          <dd>{sec.data.fileAccess}</dd>
           <dt>Policy file</dt>
           <dd>
-            <code>{sec.policy.path}</code>
+            <code>{sec.data.policy.path}</code>
           </dd>
         </dl>
       )}
@@ -221,20 +304,27 @@ export function ArmorPanel() {
 }
 
 export function AboutPanel() {
-  const [info, setInfo] = useState<AppInfo | null>(null);
-  useEffect(() => {
-    bridge?.settings
-      .appInfo()
-      .then(setInfo)
-      .catch(() => {});
-  }, []);
-  if (!info) return null;
+  const alive = useAlive();
+  const [info, setInfo] = useState<Load<AppInfo>>({ state: "loading" });
+  const load = () => {
+    if (!bridge) return;
+    setInfo({ state: "loading" });
+    bridge.settings.appInfo().then(
+      (data) => alive.current && setInfo({ state: "ready", data }),
+      (err) => alive.current && setInfo({ state: "error", text: failText(err, "Could not read the app details.") }),
+    );
+  };
+  useEffect(() => load(), []);
+  if (!bridge) return null;
+  if (info.state === "loading") return <Pending text="Reading app details." />;
+  if (info.state === "error") return <Failed text={info.text} onRetry={load} />;
+  const d = info.data;
   const rows: [string, string][] = [
-    ["App", `${info.name} ${info.version}`],
-    ["Electron", `${info.electron} (Chromium ${info.chrome}, Node ${info.node})`],
-    ["Platform", info.platform],
-    ["Database", info.database],
-    ["Settings file", info.settingsFile],
+    ["App", `${d.name} ${d.version}`],
+    ["Electron", `${d.electron} (Chromium ${d.chrome}, Node ${d.node})`],
+    ["Platform", d.platform],
+    ["Database", d.database],
+    ["Settings file", d.settingsFile],
   ];
   return (
     <dl className="armor__facts">

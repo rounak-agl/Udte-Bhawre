@@ -29,9 +29,9 @@ export type AppInfo = { name: string; version: string; electron: string; node: s
 
 export type ArmorTest = { state: "ok" | "off" | "invalid" | "unreachable" | "error"; message: string };
 
-export type Field = { key: string; label: string; required?: boolean; secret?: boolean; placeholder?: string; description?: string; helpUrl?: string; default?: string };
+type Field = { key: string; label: string; required?: boolean; secret?: boolean; placeholder?: string; description?: string; helpUrl?: string; default?: string };
 
-export type Install = { type?: "http"; url?: string; command?: string; args?: (string | string[])[]; runtime?: string; env?: Record<string, string>; headers?: Record<string, string> };
+type Install = { type?: "http"; url?: string; command?: string; args?: (string | string[])[]; runtime?: string; env?: Record<string, string>; headers?: Record<string, string> };
 
 /** A server from the curated catalog (verified) or the public MCP Registry (not reviewed). */
 export type ServerEntry = {
@@ -51,7 +51,7 @@ export type ServerEntry = {
   fields?: Field[];
 };
 
-export type Runtime = { label: string; binary: string; installUrl?: string };
+type Runtime = { label: string; binary: string; installUrl?: string };
 
 export type Catalog = { categories: string[]; entries: ServerEntry[]; runtimes: Record<string, boolean>; runtimeInfo: Record<string, Runtime> };
 
@@ -70,6 +70,8 @@ export type ServerConfig = {
 };
 
 export type TestResult = { ok: boolean; tools?: string[]; error?: string };
+
+export type SearchResult = { ok: boolean; servers?: ServerEntry[]; nextCursor?: string | null; error?: string };
 
 type Bridge = {
   post: (m: BusMsg) => void;
@@ -108,7 +110,7 @@ type Bridge = {
   connectors: {
     installed: () => Promise<Record<string, ServerConfig>>;
     catalog: () => Promise<Catalog | null>;
-    search: (query: string, cursor?: string) => Promise<{ ok: boolean; servers?: ServerEntry[]; nextCursor?: string | null; error?: string }>;
+    search: (query: string, cursor?: string) => Promise<SearchResult>;
     install: (request: { catalogId?: string; registryName?: string; version?: string; values: Record<string, string>; force?: boolean }) => Promise<{ ok: boolean; id?: string; tools?: string[]; error?: string; canForce?: boolean }>;
     test: (target: string | ServerConfig) => Promise<TestResult>;
     save: (request: { id: string; config: ServerConfig; previousId?: string }) => Promise<{ ok: boolean; id?: string; error?: string }>;
