@@ -76,6 +76,20 @@ function buildSystemPrompt({ tools, persona }) {
   return sections.join('\n\n');
 }
 
+const CONTEXT_MAX = 80;
+const HISTORY_MAX = 400;
+
+function trimContext(contents) {
+  if (contents.length <= CONTEXT_MAX) return;
+  for (let i = contents.length - CONTEXT_MAX; i < contents.length; i++) {
+    const c = contents[i];
+    if (c.role === 'user' && !c.parts.some(p => p.functionResponse)) {
+      contents.splice(0, i);
+      return;
+    }
+  }
+}
+
 /** Replace the image parts of all but the latest IMAGE_TURNS_KEPT image turns with a note. */
 function trimOldImages(contents) {
   let kept = 0;
@@ -203,6 +217,7 @@ class VisionSession extends EventEmitter {
     }
 
     this.history.push(userEntry(message, images.length, opts));
+    if (this.history.length > HISTORY_MAX) this.history.splice(0, this.history.length - HISTORY_MAX);
     this.isBusy = true;
     this.currentResponseText = '';
 
@@ -212,6 +227,7 @@ class VisionSession extends EventEmitter {
         ...images.map(img => ({ inlineData: { mimeType: img.mimeType, data: img.data } })),
         { text: promptWithImages(message, images.length) }
       ];
+      trimContext(this._conversationHistory);
       this._turnStart = this._conversationHistory.length; // planning only sees up to here
       this._conversationHistory.push({ role: 'user', parts });
       trimOldImages(this._conversationHistory);

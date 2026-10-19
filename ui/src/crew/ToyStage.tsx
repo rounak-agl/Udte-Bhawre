@@ -50,9 +50,16 @@ type Props = {
   overlay?: (toy: StageToy) => ReactNode;
   onHoverChange?: (key: string | null) => void;
   className?: string;
+  band?: number;
+  maxPixelRatio?: number;
 };
 
-export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0.14, onToyClick, onToyDrop, onToyMove, overlay, onHoverChange, className }: Props) {
+const FPS_LIVE = 60;
+const FPS_ANIM = 30;
+const FPS_CALM = 15;
+const FPS_STILL = 6;
+
+export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0.14, onToyClick, onToyDrop, onToyMove, overlay, onHoverChange, className, band, maxPixelRatio = 2 }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bodies = useRef(new Map<string, Body>());
@@ -62,12 +69,19 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
   const anchors = useRef(new Map<string, HTMLDivElement>());
   const hoverKey = useRef<string | null>(null);
   const dropKey = useRef<string | null>(null);
+  const wakeRef = useRef<() => void>(() => {});
+  const config = useRef({ band, maxPixelRatio });
+
+  useEffect(() => {
+    wakeRef.current();
+  });
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     const host = wrap.current!;
-    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, premultipliedAlpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const { band: bandPx, maxPixelRatio: maxDpr } = config.current;
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, premultipliedAlpha: true, powerPreference: "low-power" });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, maxDpr));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1;
@@ -76,7 +90,9 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
     const sc = new THREE.Scene();
     scene.current = sc;
     const pmrem = new THREE.PMREMGenerator(renderer);
-    sc.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    const room = new RoomEnvironment();
+    sc.environment = pmrem.fromScene(room, 0.04).texture;
+    room.dispose();
     sc.environmentIntensity = 0.55;
     const key = new THREE.DirectionalLight(0xfff6ec, 2.3);
     key.position.set(-3, 5, 6);
@@ -93,7 +109,10 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
       renderer.toneMappingExposure = dark ? 1.08 : 1;
     };
     light();
-    const mo = new MutationObserver(light);
+    const mo = new MutationObserver(() => {
+      light();
+      wake();
+    });
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
     const camera = new THREE.OrthographicCamera(0, 1, 0, -1, -2000, 2000);
@@ -101,17 +120,33 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
 
     let W = 1;
     let H = 1;
-    const resize = () => {
-      W = host.clientWidth;
-      H = host.clientHeight;
-      renderer.setSize(W, H, false);
+    let full = !bandPx;
+    let calmSince = 0;
+    const view = { top: 0, h: 1 };
+    const applyView = () => {
+      const h = full || !bandPx ? H : Math.min(H, bandPx);
+      const top = H - h;
+      view.top = top;
+      view.h = h;
+      renderer.setSize(W, h, false);
+      canvas.style.top = `${top}px`;
+      canvas.style.height = `${h}px`;
       camera.left = 0;
       camera.right = W;
-      camera.top = 0;
-      camera.bottom = -H;
+      camera.top = -top;
+      camera.bottom = -(top + h);
       camera.updateProjectionMatrix();
     };
-    resize();
+    const measure = () => {
+      W = Math.max(1, host.clientWidth);
+      H = Math.max(1, host.clientHeight);
+      applyView();
+    };
+    const resize = () => {
+      measure();
+      wake();
+    };
+    measure();
     const ro = new ResizeObserver(resize);
     ro.observe(host);
 
@@ -125,20 +160,40 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     };
     const pick = (x: number, y: number): string | null => {
-      ndc.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
-      ray.setFromCamera(ndc, camera);
+      if (y < view.top || y > view.top + view.h) return null;
+      ndc.set((x / W) * 2 - 1, -((y - view.top) / view.h) * 2 + 1);
+      let aimed = false;
       let best: { k: string; d: number } | null = null;
       for (const [k, b] of bodies.current) {
+        const reach = b.size * (b.rig.parts.height + 0.4);
+        if (Math.abs(x - b.pos.x) > b.size || y < b.pos.y - reach || y > b.pos.y + b.size * 0.3) continue;
+        if (!aimed) {
+          ray.setFromCamera(ndc, camera);
+          aimed = true;
+        }
         const hits = ray.intersectObject(b.rig.parts.lift, true);
         if (hits.length && (!best || hits[0].distance < best.d)) best = { k, d: hits[0].distance };
       }
       return best?.k ?? null;
     };
 
+    let pickDue = false;
+    const hover = (k: string | null) => {
+      if (k !== hoverKey.current) live.current.onHoverChange?.(k);
+      hoverKey.current = k;
+      host.style.cursor = k ? "grab" : "";
+    };
+    const nearAny = (x: number, y: number) => {
+      for (const b of bodies.current.values()) {
+        if (Math.abs(x - b.pos.x) < b.size * 2 && y > b.pos.y - b.size * (b.rig.parts.height + 1.5) && y < b.pos.y + b.size) return true;
+      }
+      return false;
+    };
     const onMove = (e: PointerEvent) => {
       const p = local(e);
       pointer.set(p.x, p.y);
       if (drag) {
+        wake();
         const b = bodies.current.get(drag.key);
         if (b) {
           if (Math.hypot(p.x - drag.sx, p.y - drag.sy) > 4) drag.moved = true;
@@ -148,10 +203,10 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         }
         return;
       }
-      const k = pick(p.x, p.y);
-      if (k !== hoverKey.current) live.current.onHoverChange?.(k);
-      hoverKey.current = k;
-      host.style.cursor = k ? "grab" : "";
+      if (hoverKey.current || nearAny(p.x, p.y)) {
+        pickDue = true;
+        wake();
+      }
     };
     const onDown = (e: PointerEvent) => {
       const p = local(e);
@@ -161,6 +216,11 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
       drag = { key: k, dx: p.x - b.pos.x, dy: p.y - b.pos.y, sx: p.x, sy: p.y, moved: false, hist: [{ x: p.x, y: p.y, t: performance.now() }] };
       canvas.setPointerCapture(e.pointerId);
       host.style.cursor = "grabbing";
+      if (bandPx && !full) {
+        full = true;
+        applyView();
+      }
+      wake();
     };
     const onUp = (e: PointerEvent) => {
       if (!drag) return;
@@ -183,11 +243,13 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
       if (b.vel.length() > 2600) b.vel.setLength(2600);
       b.tossed = true;
       live.current.onToyMove?.(d.key, b.pos.x, b.pos.y);
+      wake();
     };
     const onLeave = () => {
       pointer.set(-9999, -9999);
-      if (hoverKey.current) live.current.onHoverChange?.(null);
-      hoverKey.current = null;
+      pickDue = false;
+      hover(null);
+      wake();
     };
     const nearest = (x: number, y: number) => {
       let best: { k: string; d: number } | null = null;
@@ -200,10 +262,13 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
     const onDragOver = (e: DragEvent) => {
       e.preventDefault();
       const p = local(e);
-      dropKey.current = nearest(p.x, p.y);
+      const k = nearest(p.x, p.y);
+      if (k !== dropKey.current) wake();
+      dropKey.current = k;
     };
     const onDragLeave = () => {
       dropKey.current = null;
+      wake();
     };
     const onDrop = (e: DragEvent) => {
       e.preventDefault();
@@ -211,30 +276,82 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
       const k = nearest(p.x, p.y);
       dropKey.current = null;
       if (k && e.dataTransfer) live.current.onToyDrop?.(k, e.dataTransfer);
+      wake();
     };
 
-    canvas.addEventListener("pointermove", onMove);
+    host.addEventListener("pointermove", onMove);
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointerup", onUp);
-    canvas.addEventListener("pointerleave", onLeave);
+    host.addEventListener("pointerleave", onLeave);
     host.addEventListener("dragover", onDragOver);
     host.addEventListener("dragleave", onDragLeave);
     host.addEventListener("drop", onDrop);
 
     let raf = 0;
+    let timer = 0;
+    let running = false;
     let last = performance.now();
-    const loop = (now: number) => {
+    let budget = 0;
+    let blank = false;
+    const want = new Set<string>();
+    const settled: Body[] = [];
+    const look = { x: 0, y: 0 };
+    const placed = new Map<string, string>();
+    const schedule = (ms: number) => {
+      if (ms <= 4) raf = requestAnimationFrame(loop);
+      else
+        timer = window.setTimeout(() => {
+          timer = 0;
+          raf = requestAnimationFrame(loop);
+        }, ms);
+    };
+    const halt = () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      raf = 0;
+      timer = 0;
+      running = false;
+    };
+    function wake() {
+      if (document.hidden) return;
+      budget = 0;
+      if (running && !timer) return;
+      clearTimeout(timer);
+      timer = 0;
+      if (!running) last = performance.now();
+      running = true;
+      cancelAnimationFrame(raf);
       raf = requestAnimationFrame(loop);
-      const dt = Math.min(0.05, (now - last) / 1000);
+    }
+    const onVisibility = () => (document.hidden ? halt() : wake());
+    document.addEventListener("visibilitychange", onVisibility);
+    wakeRef.current = wake;
+
+    function loop(now: number) {
+      raf = 0;
+      const gap = now - last;
+      if (gap < budget * 0.75) {
+        raf = requestAnimationFrame(loop);
+        return;
+      }
+      const dt = Math.min(0.05, gap / 1000);
       last = now;
       const L = live.current;
-      const want = new Map(L.toys.map((t) => [t.key, t]));
+      if (pickDue && !drag) {
+        pickDue = false;
+        hover(pick(pointer.x, pointer.y));
+      }
+      want.clear();
+      for (const t of L.toys) want.add(t.key);
       for (const [k, b] of bodies.current) {
         if (!want.has(k)) {
           sc.remove(b.rig.parts.root);
           bodies.current.delete(k);
+          placed.delete(k);
         }
       }
+      let moving = !!drag || dropKey.current !== null;
+      let lively = false;
       let seedN = bodies.current.size;
       for (const t of L.toys) {
         let b = bodies.current.get(t.key);
@@ -384,24 +501,29 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
         root.position.set(b.pos.x + c * Math.sin(b.angle), -b.pos.y + c - c * Math.cos(b.angle), b.walking ? -120 : t.follow ? 60 : 0);
         root.rotation.set(L.tilt, 0, b.angle);
         const headY = b.pos.y - b.size * b.rig.parts.height;
-        const look = {
-          x: THREE.MathUtils.clamp((pointer.x - b.pos.x) / 260, -1, 1),
-          y: THREE.MathUtils.clamp(-(pointer.y - headY) / 260, -1, 1),
-        };
-        if (pointer.x < -9000) {
-          look.x = 0;
-          look.y = 0;
-        }
+        const near = pointer.x > -9000 && Math.abs(pointer.x - b.pos.x) < 400 && Math.abs(pointer.y - headY) < 400;
+        look.x = near ? THREE.MathUtils.clamp((pointer.x - b.pos.x) / 260, -1, 1) : 0;
+        look.y = near ? THREE.MathUtils.clamp(-(pointer.y - headY) / 260, -1, 1) : 0;
         b.rig.update(dt, { look, speed: 1, reduced: L.reduced, intensity: L.intensity, walk, stride: b.phase });
         root.scale.multiplyScalar(b.size);
+        if (b.tossed || b.held) moving = true;
+        if (b.walking) lively = true;
+        if (b.rig.lively) lively = true;
         const el = anchors.current.get(t.key);
-        if (el) el.style.transform = `translate3d(${b.pos.x}px, ${headY}px, 0)`;
+        if (el) {
+          const tf = `translate3d(${b.pos.x.toFixed(1)}px, ${headY.toFixed(1)}px, 0)`;
+          if (placed.get(t.key) !== tf) {
+            el.style.transform = tf;
+            placed.set(t.key, tf);
+          }
+        }
       }
-      const list = [...bodies.current.values()].filter((b) => !b.tossed && !b.held && !b.walking);
-      for (let i = 0; i < list.length; i++) {
-        for (let j = i + 1; j < list.length; j++) {
-          const a = list[i];
-          const o = list[j];
+      settled.length = 0;
+      for (const b of bodies.current.values()) if (!b.tossed && !b.held && !b.walking) settled.push(b);
+      for (let i = 0; i < settled.length; i++) {
+        for (let j = i + 1; j < settled.length; j++) {
+          const a = settled[i];
+          const o = settled[j];
           const min = (a.size + o.size) * 0.62;
           const d = o.pos.x - a.pos.x;
           if (Math.abs(d) < min && Math.abs(o.pos.y - a.pos.y) < 40) {
@@ -413,25 +535,48 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
             o.pos.x = THREE.MathUtils.clamp(o.pos.x, o.size * 0.6, W - o.size * 0.6);
             if (a.placed) a.home.x = a.pos.x;
             if (o.placed) o.home.x = o.pos.x;
+            if (push > 0.05) moving = true;
           }
         }
       }
-      renderer.render(sc, camera);
-    };
-    raf = requestAnimationFrame(loop);
+      if (bandPx) {
+        let airborne = !!drag;
+        for (const b of bodies.current.values()) if (b.tossed || b.rig.bursting || b.pos.y - b.size * (b.rig.parts.height + 0.6) < H - bandPx) airborne = true;
+        if (airborne) calmSince = now;
+        const wantFull = airborne || now - calmSince < 400;
+        if (wantFull !== full) {
+          full = wantFull;
+          applyView();
+        }
+      }
+      const empty = !bodies.current.size && !L.toys.length;
+      if (!empty || !blank) renderer.render(sc, camera);
+      blank = empty;
+      if (empty) {
+        running = false;
+        return;
+      }
+      const fps = drag ? 0 : moving ? FPS_LIVE : lively && !L.reduced ? FPS_ANIM : L.reduced ? FPS_STILL : FPS_CALM;
+      budget = fps ? 1000 / fps : 0;
+      schedule(fps >= FPS_LIVE || !fps ? 0 : budget - (performance.now() - now));
+    }
+    wake();
 
     return () => {
-      cancelAnimationFrame(raf);
+      halt();
+      wakeRef.current = () => {};
+      document.removeEventListener("visibilitychange", onVisibility);
       ro.disconnect();
       mo.disconnect();
-      canvas.removeEventListener("pointermove", onMove);
+      host.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointerup", onUp);
-      canvas.removeEventListener("pointerleave", onLeave);
+      host.removeEventListener("pointerleave", onLeave);
       host.removeEventListener("dragover", onDragOver);
       host.removeEventListener("dragleave", onDragLeave);
       host.removeEventListener("drop", onDrop);
       bodies.current.clear();
+      sc.environment?.dispose();
       pmrem.dispose();
       renderer.dispose();
     };
@@ -439,7 +584,7 @@ export function ToyStage({ toys, float = false, intensity = 1, reduced, tilt = 0
 
   return (
     <div ref={wrap} className={`toy-stage ${className ?? ""}`} style={{ position: "relative", width: "100%", height: "100%" }}>
-      <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", touchAction: "none" }} />
+      <canvas ref={canvasRef} style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", touchAction: "none" }} />
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
         {overlay &&
           toys.map((t) => (

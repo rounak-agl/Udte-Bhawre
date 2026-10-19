@@ -4,21 +4,59 @@ import type { CrewId, ToyState } from "./roster";
 
 type MatKind = "flock" | "gloss" | "satin" | "fur";
 
-function mat(kind: MatKind, color: number | string): THREE.MeshPhysicalMaterial {
+const geoCache = new Map<string, THREE.BufferGeometry>();
+function shared(key: string, make: () => THREE.BufferGeometry) {
+  let g = geoCache.get(key);
+  if (!g) {
+    g = make();
+    geoCache.set(key, g);
+  }
+  return g;
+}
+const sphere = (...a: ConstructorParameters<typeof THREE.SphereGeometry>) => shared(`sphere${a.join()}`, () => new THREE.SphereGeometry(...a));
+const capsule = (...a: ConstructorParameters<typeof THREE.CapsuleGeometry>) => shared(`capsule${a.join()}`, () => new THREE.CapsuleGeometry(...a));
+const cylinder = (...a: ConstructorParameters<typeof THREE.CylinderGeometry>) => shared(`cylinder${a.join()}`, () => new THREE.CylinderGeometry(...a));
+const cone = (...a: ConstructorParameters<typeof THREE.ConeGeometry>) => shared(`cone${a.join()}`, () => new THREE.ConeGeometry(...a));
+const torus = (...a: ConstructorParameters<typeof THREE.TorusGeometry>) => shared(`torus${a.join()}`, () => new THREE.TorusGeometry(...a));
+const box = (...a: ConstructorParameters<typeof THREE.BoxGeometry>) => shared(`box${a.join()}`, () => new THREE.BoxGeometry(...a));
+const roundedBox = (...a: ConstructorParameters<typeof RoundedBoxGeometry>) => shared(`rbox${a.join()}`, () => new RoundedBoxGeometry(...a));
+const lathe = (h: number, r: number, pts: THREE.Vector2[]) => shared(`lathe${h},${r}`, () => new THREE.LatheGeometry(pts, 16));
+
+const matCache = new Map<string, THREE.MeshPhysicalMaterial>();
+function mat(kind: MatKind, color: number | string, opts: { side?: THREE.Side; map?: THREE.Texture } = {}): THREE.MeshPhysicalMaterial {
   const c = new THREE.Color(color);
+  const key = `${kind}:${c.getHexString()}:${opts.side ?? 0}:${opts.map?.uuid ?? ""}`;
+  const hit = matCache.get(key);
+  if (hit) return hit;
+  let m: THREE.MeshPhysicalMaterial;
   if (kind === "flock" || kind === "fur") {
-    return new THREE.MeshPhysicalMaterial({
+    m = new THREE.MeshPhysicalMaterial({
       color: c,
       roughness: 0.92,
       sheen: 1,
       sheenRoughness: 0.55,
       sheenColor: c.clone().lerp(new THREE.Color(0xffffff), 0.45),
     });
+  } else if (kind === "gloss") {
+    m = new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.12 });
+  } else {
+    m = new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.55, clearcoat: 0.35, clearcoatRoughness: 0.4 });
   }
-  if (kind === "gloss") {
-    return new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.12 });
+  if (opts.side !== undefined) m.side = opts.side;
+  if (opts.map) m.map = opts.map;
+  matCache.set(key, m);
+  return m;
+}
+
+const basicCache = new Map<string, THREE.MeshBasicMaterial>();
+function basic(color: number, opacity = 1, side: THREE.Side = THREE.FrontSide) {
+  const key = `${color}:${opacity}:${side}`;
+  let m = basicCache.get(key);
+  if (!m) {
+    m = new THREE.MeshBasicMaterial({ color, side, transparent: opacity < 1, opacity });
+    basicCache.set(key, m);
   }
-  return new THREE.MeshPhysicalMaterial({ color: c, roughness: 0.55, clearcoat: 0.35, clearcoatRoughness: 0.4 });
+  return m;
 }
 
 const WHITE = 0xfbfbf8;
@@ -41,7 +79,7 @@ function softSpike(h: number, r: number) {
     new THREE.Vector2(r * 0.2, h * 0.93),
     new THREE.Vector2(0, h),
   ];
-  return new THREE.LatheGeometry(pts, 24);
+  return lathe(h, r, pts);
 }
 
 let furTexture: THREE.DataTexture | null = null;
@@ -65,29 +103,39 @@ function getFurTexture() {
   return furTexture;
 }
 
-function furShells(geo: THREE.BufferGeometry, color: number, layers = 10, length = 0.07) {
+const furCache = new Map<string, THREE.MeshStandardMaterial>();
+function furShells(geo: THREE.BufferGeometry, color: number, layers = 8, length = 0.07) {
   const g = new THREE.Group();
   const base = new THREE.Color(color);
   for (let i = 1; i <= layers; i++) {
-    const f = i / layers;
-    const m = new THREE.MeshStandardMaterial({ color: base.clone().multiplyScalar(0.72 + 0.28 * f), roughness: 0.95 });
-    m.alphaMap = getFurTexture();
-    m.alphaTest = 0.25 + 0.7 * f;
-    m.transparent = false;
-    const offset = length * f;
-    m.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader.replace(
-        "#include <begin_vertex>",
-        `#include <begin_vertex>\ntransformed += normalize(objectNormal) * ${offset.toFixed(4)};`,
-      );
-    };
-    m.customProgramCacheKey = () => `fur-${i}`;
+    const key = `${color}:${layers}:${i}`;
+    let m = furCache.get(key);
+    if (!m) {
+      const f = i / layers;
+      const shell = new THREE.MeshStandardMaterial({ color: base.clone().multiplyScalar(0.72 + 0.28 * f), roughness: 0.95 });
+      shell.alphaMap = getFurTexture();
+      shell.alphaTest = 0.25 + 0.7 * f;
+      shell.transparent = false;
+      const offset = (length * f).toFixed(4);
+      shell.onBeforeCompile = (shader) => {
+        shader.vertexShader = shader.vertexShader.replace(
+          "#include <begin_vertex>",
+          `#include <begin_vertex>\ntransformed += normalize(objectNormal) * ${offset};`,
+        );
+      };
+      shell.customProgramCacheKey = () => `fur-${offset}`;
+      furCache.set(key, shell);
+      m = shell;
+    }
     g.add(new THREE.Mesh(geo, m));
   }
   return g;
 }
 
+const stripeCache = new Map<string, THREE.CanvasTexture>();
 function stripeTexture(a: string, b: string) {
+  const hit = stripeCache.get(a + b);
+  if (hit) return hit;
   const c = document.createElement("canvas");
   c.width = 8;
   c.height = 64;
@@ -98,6 +146,7 @@ function stripeTexture(a: string, b: string) {
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  stripeCache.set(a + b, t);
   return t;
 }
 
@@ -114,23 +163,22 @@ function makeEye(r: number, lidColor: number, lidKind: MatKind, dot = false): Ey
   const group = new THREE.Group();
   const pupil = new THREE.Group();
   if (dot) {
-    const p = mesh(new THREE.SphereGeometry(r, 24, 16), mat("gloss", BLACK));
+    const p = mesh(sphere(r, 24, 16), mat("gloss", BLACK));
     p.scale.set(1, 1.1, 0.6);
-    const glint = mesh(new THREE.SphereGeometry(r * 0.28, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }), r * 0.35, r * 0.4, r * 0.55);
+    const glint = mesh(sphere(r * 0.28, 12, 8), basic(0xffffff), r * 0.35, r * 0.4, r * 0.55);
     pupil.add(p, glint);
     group.add(pupil);
     return { group, pupil, dot: true, r };
   }
-  const sclera = mesh(new THREE.SphereGeometry(r, 32, 24), mat("gloss", WHITE));
-  const p = mesh(new THREE.SphereGeometry(r * 0.56, 24, 16), mat("gloss", BLACK));
+  const sclera = mesh(sphere(r, 24, 18), mat("gloss", WHITE));
+  const p = mesh(sphere(r * 0.56, 24, 16), mat("gloss", BLACK));
   p.scale.set(1, 1.06, 0.42);
-  const glint = mesh(new THREE.SphereGeometry(r * 0.15, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }), r * 0.2, r * 0.22, r * 0.3);
+  const glint = mesh(sphere(r * 0.15, 12, 8), basic(0xffffff), r * 0.2, r * 0.22, r * 0.3);
   pupil.add(p, glint);
   pupil.position.z = r * 0.78;
-  const lm = mat(lidKind === "fur" ? "flock" : lidKind, lidColor);
-  lm.side = THREE.DoubleSide;
-  const lidTop = mesh(new THREE.SphereGeometry(r * 1.07, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), lm);
-  const lidBot = mesh(new THREE.SphereGeometry(r * 1.07, 32, 16, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), lm);
+  const lm = mat(lidKind === "fur" ? "flock" : lidKind, lidColor, { side: THREE.DoubleSide });
+  const lidTop = mesh(sphere(r * 1.07, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), lm);
+  const lidBot = mesh(sphere(r * 1.07, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), lm);
   group.add(sclera, pupil, lidTop, lidBot);
   group.scale.z = 0.62;
   return { group, pupil, lidTop, lidBot, dot: false, r };
@@ -146,43 +194,22 @@ export type ToyParts = {
   eyes: Eye[];
   hat?: THREE.Group;
   prop?: THREE.Object3D;
-  shadow: THREE.Mesh;
   height: number;
   pivotY: number;
   lidRest: number;
 };
 
-let shadowTex: THREE.Texture | null = null;
-function getShadowTex() {
-  if (shadowTex) return shadowTex;
-  const c = document.createElement("canvas");
-  c.width = c.height = 128;
-  const ctx = c.getContext("2d")!;
-  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-  g.addColorStop(0, "rgba(0,0,0,0.42)");
-  g.addColorStop(0.55, "rgba(0,0,0,0.16)");
-  g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 128, 128);
-  shadowTex = new THREE.CanvasTexture(c);
-  return shadowTex;
-}
-
 function arm(color: number, kind: MatKind, len = 0.2, r = 0.085) {
   const pivot = new THREE.Group();
-  const a = mesh(new THREE.CapsuleGeometry(r, len, 8, 16), mat(kind === "fur" ? "flock" : kind, color), 0, -len / 2 - r * 0.4, 0);
+  const a = mesh(capsule(r, len, 8, 16), mat(kind === "fur" ? "flock" : kind, color), 0, -len / 2 - r * 0.4, 0);
   pivot.add(a);
   return pivot;
 }
 
 function leg(color: number, kind: MatKind, len = 0.12, r = 0.1, sock?: THREE.Texture) {
   const pivot = new THREE.Group();
-  const m = mat(kind === "fur" ? "flock" : kind, color);
-  if (sock) {
-    m.map = sock;
-    m.color.set(0xffffff);
-  }
-  const l = mesh(new THREE.CapsuleGeometry(r, len, 8, 16), m, 0, -(len / 2 + r), 0);
+  const m = sock ? mat(kind === "fur" ? "flock" : kind, 0xffffff, { map: sock }) : mat(kind === "fur" ? "flock" : kind, color);
+  const l = mesh(capsule(r, len, 8, 16), m, 0, -(len / 2 + r), 0);
   pivot.add(l);
   return pivot;
 }
@@ -195,15 +222,6 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
   root.add(lift);
   lift.add(turn);
   turn.add(squash);
-
-  const shadow = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.3, 0.42),
-    new THREE.MeshBasicMaterial({ map: getShadowTex(), transparent: true, depthWrite: false }),
-  );
-  shadow.position.set(0, 0.02, -0.5);
-  shadow.renderOrder = -1;
-  shadow.visible = false;
-  root.add(shadow);
 
   const legs: THREE.Group[] = [];
   const arms: THREE.Group[] = [];
@@ -241,7 +259,7 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     }
   };
   const beak = (y: number, z: number, s = 1) => {
-    const b = mesh(new THREE.SphereGeometry(0.075 * s, 20, 14), mat("gloss", BEAK), 0, y, z);
+    const b = mesh(sphere(0.075 * s, 20, 14), mat("gloss", BEAK), 0, y, z);
     b.scale.set(1.25, 0.78, 0.9);
     squash.add(b);
   };
@@ -250,7 +268,7 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     const body = new THREE.Color(hex).getHex();
     pivotY = 0.18;
     addLegs(0.2, 0.2, body, "flock", 0.06, 0.11);
-    const b = mesh(new RoundedBoxGeometry(1.02, 0.98, 0.8, 6, 0.34), mat("flock", body), 0, 0.2 + 0.49, 0);
+    const b = mesh(roundedBox(1.02, 0.98, 0.8, 6, 0.34), mat("flock", body), 0, 0.2 + 0.49, 0);
     squash.add(b);
     const spikes: [number, number, number, number, number][] = [
       [-0.38, 1.08, 0.02, 0.36, 0.5],
@@ -272,11 +290,11 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     lidRest = 0.52;
     height = 1.5;
     const env = new THREE.Group();
-    const paper = mesh(new RoundedBoxGeometry(0.34, 0.24, 0.03, 2, 0.015), mat("satin", 0xfaf7ee));
-    const flap = mesh(new THREE.ConeGeometry(0.17, 0.1, 4, 1), mat("satin", 0xe9e2cf), 0, 0.06, 0.02);
+    const paper = mesh(roundedBox(0.34, 0.24, 0.03, 2, 0.015), mat("satin", 0xfaf7ee));
+    const flap = mesh(cone(0.17, 0.1, 4, 1), mat("satin", 0xe9e2cf), 0, 0.06, 0.02);
     flap.rotation.set(Math.PI / 2, Math.PI / 4, 0);
     flap.scale.set(1, 1, 0.1);
-    const stamp = mesh(new THREE.BoxGeometry(0.06, 0.07, 0.01), mat("satin", 0xff4d5e), 0.11, 0.06, 0.02);
+    const stamp = mesh(box(0.06, 0.07, 0.01), mat("satin", 0xff4d5e), 0.11, 0.06, 0.02);
     env.add(paper, flap, stamp);
     env.position.set(0, -0.3, 0.1);
     env.visible = false;
@@ -286,7 +304,7 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     const body = new THREE.Color(hex).getHex();
     pivotY = 0.2;
     addLegs(0.22, 0.17, body, "flock", 0.08, 0.1);
-    const geo = new THREE.CapsuleGeometry(0.42, 0.56, 12, 32);
+    const geo = capsule(0.42, 0.56, 12, 32);
     const core = mesh(geo, mat("flock", new THREE.Color(body).multiplyScalar(0.7).getHex()), 0, 0.2 + 0.7, 0);
     const fur = furShells(geo, body);
     fur.position.copy(core.position);
@@ -295,11 +313,11 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     addArms(0.82, 0.45, body, "flock", 0.14, 0.09);
     lidRest = 0.95;
     const cap = new THREE.Group();
-    const dome = mesh(new THREE.SphereGeometry(0.3, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), mat("gloss", 0x2f6bff));
+    const dome = mesh(sphere(0.3, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2), mat("gloss", 0x2f6bff));
     dome.scale.set(1, 0.85, 1);
-    const brim = mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.03, 32, 1, false, 0, Math.PI), mat("gloss", 0x2f6bff), 0, 0.01, -0.22);
+    const brim = mesh(cylinder(0.22, 0.22, 0.03, 32, 1, false, 0, Math.PI), mat("gloss", 0x2f6bff), 0, 0.01, -0.22);
     brim.scale.set(1, 1, 1.2);
-    const button = mesh(new THREE.SphereGeometry(0.04, 12, 8), mat("gloss", 0x2f6bff), 0, 0.26, 0);
+    const button = mesh(sphere(0.04, 12, 8), mat("gloss", 0x2f6bff), 0, 0.26, 0);
     cap.add(dome, brim, button);
     cap.position.set(0.04, 1.5, -0.02);
     cap.scale.setScalar(1.25);
@@ -307,10 +325,10 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     squash.add(cap);
     hat = cap;
     const pencil = new THREE.Group();
-    const shaft = mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.34, 6), mat("satin", 0xffd23f));
-    const tip = mesh(new THREE.ConeGeometry(0.03, 0.08, 6), mat("satin", 0xf1d3a7), 0, -0.21, 0);
+    const shaft = mesh(cylinder(0.03, 0.03, 0.34, 6), mat("satin", 0xffd23f));
+    const tip = mesh(cone(0.03, 0.08, 6), mat("satin", 0xf1d3a7), 0, -0.21, 0);
     tip.rotation.z = Math.PI;
-    const eraser = mesh(new THREE.CylinderGeometry(0.031, 0.031, 0.05, 6), mat("satin", 0xff8fc7), 0, 0.19, 0);
+    const eraser = mesh(cylinder(0.031, 0.031, 0.05, 6), mat("satin", 0xff8fc7), 0, 0.19, 0);
     pencil.add(shaft, tip, eraser);
     pencil.position.set(0.44, 1.2, 0.0);
     pencil.rotation.set(0.2, 0, -0.5);
@@ -320,27 +338,27 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
   } else if (id === "tuck") {
     pivotY = 0.14;
     addLegs(0.16, 0.24, 0xf2f2ee, "gloss", 0.04, 0.1);
-    const b = mesh(new RoundedBoxGeometry(1.02, 0.92, 0.9, 6, 0.24), mat("gloss", WHITE), 0, 0.16 + 0.46, 0);
+    const b = mesh(roundedBox(1.02, 0.92, 0.9, 6, 0.24), mat("gloss", WHITE), 0, 0.16 + 0.46, 0);
     squash.add(b);
     addEyes(0.7, 0.2, 0.455, 0.055, WHITE, "gloss", true);
     beak(0.56, 0.47, 1.25);
     for (const s of [-1, 1]) {
-      const cheek = mesh(new THREE.SphereGeometry(0.06, 16, 8), new THREE.MeshBasicMaterial({ color: 0xffb3c8, transparent: true, opacity: 0.55 }), s * 0.33, 0.56, 0.452);
+      const cheek = mesh(sphere(0.06, 16, 8), basic(0xffb3c8, 0.55), s * 0.33, 0.56, 0.452);
       cheek.scale.set(1, 0.6, 0.2);
       squash.add(cheek);
     }
     addArms(0.55, 0.52, WHITE, "gloss", 0.12, 0.09);
     const lidPivot = new THREE.Group();
     lidPivot.position.set(0, 1.08, -0.46);
-    const lid = mesh(new RoundedBoxGeometry(1.1, 0.16, 0.98, 4, 0.07), mat("gloss", hex), 0, 0.08, 0.46);
-    const knob = mesh(new THREE.SphereGeometry(0.07, 16, 8), mat("gloss", hex), 0, 0.17, 0.46);
+    const lid = mesh(roundedBox(1.1, 0.16, 0.98, 4, 0.07), mat("gloss", hex), 0, 0.08, 0.46);
+    const knob = mesh(sphere(0.07, 16, 8), mat("gloss", hex), 0, 0.17, 0.46);
     knob.scale.set(1.4, 0.7, 1);
     lidPivot.add(lid, knob);
     squash.add(lidPivot);
     hat = lidPivot;
     const folders = new THREE.Group();
     ["#ffd23f", "#4d9dff", "#ff5a36"].forEach((c, i) => {
-      const f = mesh(new RoundedBoxGeometry(0.36, 0.26, 0.02, 2, 0.01), mat("satin", c), (i - 1) * 0.05, 0, (i - 1) * 0.04);
+      const f = mesh(roundedBox(0.36, 0.26, 0.02, 2, 0.01), mat("satin", c), (i - 1) * 0.05, 0, (i - 1) * 0.04);
       folders.add(f);
     });
     folders.position.set(0, 1.05, 0);
@@ -353,17 +371,16 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     const body = new THREE.Color(hex).getHex();
     pivotY = 0.2;
     addLegs(0.22, 0.2, body, "gloss", 0.1, 0.1);
-    const b = mesh(new THREE.SphereGeometry(0.52, 48, 32), mat("gloss", body), 0, 0.2 + 0.46, 0);
+    const b = mesh(sphere(0.52, 32, 24), mat("gloss", body), 0, 0.2 + 0.46, 0);
     b.scale.set(1, 0.9, 0.86);
-    const stem = mesh(new THREE.CapsuleGeometry(0.22, 0.5, 12, 24), mat("gloss", body), -0.24, 1.1, -0.04);
+    const stem = mesh(capsule(0.22, 0.5, 12, 24), mat("gloss", body), -0.24, 1.1, -0.04);
     stem.rotation.z = 0.08;
     squash.add(b, stem);
     addEyes(0.84, 0.17, 0.385, 0.155, body, "gloss");
     addArms(0.6, 0.5, body, "gloss", 0.16, 0.09);
     const mega = new THREE.Group();
-    const horn = mesh(new THREE.CylinderGeometry(0.16, 0.05, 0.3, 32, 1, true), mat("gloss", 0xffd23f));
-    (horn.material as THREE.MeshPhysicalMaterial).side = THREE.DoubleSide;
-    const handle = mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.12, 12), mat("gloss", 0x111111), 0, -0.12, -0.05);
+    const horn = mesh(cylinder(0.16, 0.05, 0.3, 32, 1, true), mat("gloss", 0xffd23f, { side: THREE.DoubleSide }));
+    const handle = mesh(cylinder(0.035, 0.035, 0.12, 12), mat("gloss", 0x111111), 0, -0.12, -0.05);
     mega.add(horn, handle);
     mega.rotation.set(0, 0, Math.PI / 2 + 0.4);
     mega.position.set(0.05, -0.32, 0.12);
@@ -375,18 +392,18 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     const body = new THREE.Color(hex).getHex();
     pivotY = 0.24;
     addLegs(0.26, 0.15, 0xffffff, "satin", 0.12, 0.085, stripeTexture("#ff4d5e", "#ffffff"));
-    const b = mesh(new THREE.SphereGeometry(0.44, 48, 32), mat("gloss", body), 0, 0.26 + 0.4, 0);
+    const b = mesh(sphere(0.44, 32, 24), mat("gloss", body), 0, 0.26 + 0.4, 0);
     b.scale.set(1, 0.95, 0.9);
     squash.add(b);
     addEyes(0.74, 0.14, 0.355, 0.12, body, "gloss");
-    const mouth = mesh(new THREE.TorusGeometry(0.03, 0.013, 8, 20), mat("gloss", 0x3a2a10), 0, 0.56, 0.4);
+    const mouth = mesh(torus(0.03, 0.013, 8, 20), mat("gloss", 0x3a2a10), 0, 0.56, 0.4);
     squash.add(mouth);
     addArms(0.6, 0.43, body, "gloss", 0.12, 0.08);
     const visor = new THREE.Group();
-    const band = mesh(new THREE.TorusGeometry(0.43, 0.03, 8, 48, Math.PI * 1.1), mat("satin", 0x1f9a55));
+    const band = mesh(torus(0.43, 0.03, 8, 48, Math.PI * 1.1), mat("satin", 0x1f9a55));
     band.rotation.set(Math.PI / 2, 0, Math.PI * 0.95);
     band.scale.set(1, 0.95, 1);
-    const brim = mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.025, 40, 1, false, -Math.PI / 2.4, Math.PI / 1.2), mat("satin", 0x22b862), 0, -0.01, 0.12);
+    const brim = mesh(cylinder(0.34, 0.34, 0.025, 40, 1, false, -Math.PI / 2.4, Math.PI / 1.2), mat("satin", 0x22b862), 0, -0.01, 0.12);
     brim.scale.set(1, 1, 0.75);
     brim.rotation.x = 0.2;
     visor.add(band, brim);
@@ -394,7 +411,7 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     visor.rotation.x = -0.15;
     squash.add(visor);
     hat = visor;
-    const coin = mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.025, 32), mat("gloss", 0xffb300));
+    const coin = mesh(cylinder(0.09, 0.09, 0.025, 32), mat("gloss", 0xffb300));
     coin.rotation.x = Math.PI / 2;
     coin.position.set(0, 1.1, 0.1);
     coin.visible = false;
@@ -406,7 +423,7 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
     const body = new THREE.Color(hex).getHex();
     pivotY = 0.12;
     addLegs(0.14, 0.07, body, "gloss", 0.06, 0.05);
-    const b = mesh(new THREE.CapsuleGeometry(0.15, 0.48, 10, 20), mat("gloss", body), 0, 0.14 + 0.39, 0);
+    const b = mesh(capsule(0.15, 0.48, 10, 20), mat("gloss", body), 0, 0.14 + 0.39, 0);
     squash.add(b);
     addEyes(0.74, 0.065, 0.13, 0.06, body, "gloss");
     addArms(0.6, 0.17, body, "gloss", 0.18, 0.04);
@@ -416,7 +433,7 @@ export function buildToy(id: CrewId | "mini", hex: number): ToyParts {
 
   squash.position.y = pivotY;
   for (const c of squash.children) c.position.y -= pivotY;
-  return { root, lift, squash, turn, legs, arms, eyes, hat, prop, shadow, height, pivotY, lidRest };
+  return { root, lift, squash, turn, legs, arms, eyes, hat, prop, height, pivotY, lidRest };
 }
 
 class Spring {
@@ -477,6 +494,7 @@ export class ToyRig {
   private nextBlink = 2;
   private blinkUntil = 0;
   private confetti: Confetti[] = [];
+  private springs = [this.lift, this.sq, this.lean, this.tilt, this.turnY, this.armL, this.armR, this.armRx, this.lid, this.lidLow, this.scale, this.hat, this.gx, this.gy];
   private t = 0;
 
   constructor(
@@ -508,6 +526,23 @@ export class ToyRig {
     if (s === "working") this.sq.kick(-2);
   }
 
+  get settled() {
+    if (this.confetti.length) return false;
+    for (const s of this.springs) if (Math.abs(s.x - s.target) > 1e-3 || Math.abs(s.v) > 1e-3) return false;
+    return true;
+  }
+
+  get bursting() {
+    return this.confetti.length > 0;
+  }
+
+  get lively() {
+    const s = this.state;
+    if (s === "idle" || s === "sleeping" || s === "listening" || s === "oops") return !this.settled;
+    if (s === "done") return this.t - this.entered < 2 || !this.settled;
+    return true;
+  }
+
   land(strength: number) {
     this.sq.x = Math.max(0.7, 1 - strength * 0.25);
   }
@@ -515,10 +550,7 @@ export class ToyRig {
   private burst() {
     const root = this.parts.squash;
     for (let i = 0; i < 26; i++) {
-      const m = new THREE.Mesh(
-        new THREE.BoxGeometry(0.05, 0.08, 0.01),
-        new THREE.MeshBasicMaterial({ color: CONFETTI[i % 5], side: THREE.DoubleSide }),
-      );
+      const m = new THREE.Mesh(box(0.05, 0.08, 0.01), basic(CONFETTI[i % 5], 1, THREE.DoubleSide));
       m.position.set(0.5, 0.55, 0.3);
       const a = -0.3 + Math.random() * 1.6;
       const sp = 2 + Math.random() * 2.2;
@@ -708,7 +740,7 @@ export class ToyRig {
     this.gy.target = Math.max(-1, Math.min(1, gy));
 
     const sdt = Math.min(dt, 1 / 30);
-    for (const s of [this.lift, this.sq, this.lean, this.tilt, this.turnY, this.armL, this.armR, this.armRx, this.lid, this.lidLow, this.scale, this.hat, this.gx, this.gy]) {
+    for (const s of this.springs) {
       if (inp.reduced) {
         s.x = s.target;
         s.v = 0;
@@ -747,10 +779,6 @@ export class ToyRig {
       if (e.lidBot) e.lidBot.rotation.x = THREE.MathUtils.lerp(0.9, -Math.PI / 2 + 0.25, lowO);
     }
 
-    const h = Math.max(0, this.lift.x);
-    p.shadow.scale.setScalar(1 - Math.min(0.5, h * 0.9));
-    (p.shadow.material as THREE.MeshBasicMaterial).opacity = 1 - Math.min(0.7, h * 1.4);
-  
     for (let i = this.confetti.length - 1; i >= 0; i--) {
       const c = this.confetti[i];
       c.life -= dt;
@@ -760,7 +788,6 @@ export class ToyRig {
       c.m.rotation.y += dt * 5;
       if (c.life <= 0) {
         c.m.removeFromParent();
-        c.m.geometry.dispose();
         this.confetti.splice(i, 1);
       }
     }

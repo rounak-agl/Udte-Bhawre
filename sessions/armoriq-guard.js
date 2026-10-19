@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+const AUDIT_MAX = 500;
+
 /**
  * ArmorIQ Guard — Intent-based security enforcement for Desktop Assistant.
  *
@@ -580,6 +582,7 @@ class ArmorIQGuard extends EventEmitter {
       userId: this.config.userId,
       ...details,
     });
+    if (this.auditLog.length > AUDIT_MAX) this.auditLog.splice(0, this.auditLog.length - AUDIT_MAX);
   }
 
   /**

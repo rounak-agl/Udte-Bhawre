@@ -93,6 +93,7 @@
   padding-bottom: var(--space-4);
 }
 .armor > .field__hint,
+.armor > .cloudkey__msg,
 .armor__test,
 .armor__facts {
   margin: 0 var(--space-4);
@@ -103,7 +104,7 @@
 }
 .armor__head {
   display: grid;
-  grid-template-columns: 20px 1fr auto;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-4) var(--space-4) 0;
@@ -121,9 +122,12 @@
 .armor__head b {
   font-weight: 500;
 }
+.armor__head .eyebrow {
+  overflow-wrap: anywhere;
+}
 .armor code,
 .armor__facts code,
-.tools__list code {
+.testout__list code {
   font-family: var(--mono);
   font-size: var(--text-xs);
 }
@@ -135,7 +139,7 @@
 }
 .armor__facts {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 120px minmax(0, 1fr);
   gap: var(--space-2) var(--space-4);
   font-size: var(--text-sm);
 }
@@ -207,7 +211,7 @@
   font-size: var(--text-sm);
 }
 .browse__h {
-  margin-top: var(--space-5, 24px);
+  margin-top: var(--space-5);
 }
 
 .servers {
@@ -222,7 +226,7 @@
 }
 .server__main {
   display: grid;
-  grid-template-columns: 24px 1fr auto auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--space-3);
 }
@@ -247,7 +251,9 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--space-2);
+  min-width: 0;
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 .server__sum {
   font-family: var(--mono);
@@ -259,30 +265,29 @@
 }
 .server__actions {
   display: flex;
-  gap: var(--space-1, 4px);
+  gap: var(--space-1);
 }
-.server > .tools,
+.server > .testout,
 .server > .cloudkey__msg,
+.server > .empty-note,
 .server > .field__hint {
   margin-left: calc(24px + var(--space-3));
 }
-.tools {
+.testout {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
 }
-.tools__list {
+.testout__list {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-1, 4px);
+  gap: var(--space-1);
 }
-.tools__list code {
+.testout__list code {
   padding: 1px 6px;
   border: 1px solid var(--rule);
   border-radius: var(--radius-2);
-}
-.pre {
-  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .custom {
@@ -303,7 +308,7 @@
 .inp {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1, 4px);
+  gap: var(--space-1);
   width: 100%;
 }
 .inp__label {
@@ -331,7 +336,7 @@
 .field__hint a {
   color: inherit;
 }
-.check {
+.warnbox__check {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -341,7 +346,7 @@
 .sheet {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--z-modal);
   display: grid;
   place-items: center;
   padding: var(--space-4);
@@ -354,19 +359,22 @@
   max-height: calc(100vh - 48px);
   background: var(--surface);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-3, 10px);
-  box-shadow: 0 24px 60px rgb(0 0 0 / 0.25);
+  border-radius: var(--radius-3);
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--ink) 25%, transparent);
 }
 .sheet__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--space-3) var(--space-4);
+  gap: var(--space-3);
   border-bottom: 1px solid var(--rule);
 }
 .sheet__head h2 {
+  min-width: 0;
   font-size: var(--text-lg);
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 .sheet__body {
   display: flex;
@@ -377,6 +385,9 @@
 }
 .sheet__body .custom {
   margin-top: 0;
+}
+.sheet__body .lede {
+  overflow-wrap: anywhere;
 }
 .sheet__by {
   display: flex;
@@ -390,4 +401,54 @@
   justify-content: flex-end;
   gap: var(--space-2);
   padding-top: var(--space-2);
+}
+
+/* Saved secrets are shown masked */
+.secret__saved {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.secret__mask {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Loading, failure and long-string guards */
+.busy-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.fail-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.secrets .cloudkey__msg,
+.armor .cloudkey__msg,
+.custom .cloudkey__msg,
+.sheet .cloudkey__msg,
+.server .cloudkey__msg,
+.cloudkey__msg.fail-note {
+  padding: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.empty-note {
+  overflow-wrap: anywhere;
+}
+.conn {
+  min-width: 0;
+}
+.conn__name {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }

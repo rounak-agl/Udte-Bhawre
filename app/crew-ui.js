@@ -30,8 +30,8 @@ function load(win, view, params = {}) {
   }
 }
 
-function prefs() {
-  return { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' };
+function prefs(alwaysOn = false) {
+  return { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: !alwaysOn, autoplayPolicy: 'no-user-gesture-required' };
 }
 
 function surface() {
@@ -78,7 +78,7 @@ function createStage() {
     alwaysOnTop: true,
     focusable: false,
     backgroundColor: '#00000000',
-    webPreferences: prefs()
+    webPreferences: prefs(true)
   });
   win.setAlwaysOnTop(true, 'screen-saver');
   win.setIgnoreMouseEvents(true, { forward: true });

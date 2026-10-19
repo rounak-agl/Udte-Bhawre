@@ -15,6 +15,12 @@ const PAGE_SIZE = 30;
 
 const cache = new Map();   // url → { at, value }
 const seen = new Map();    // `${name}@${version}` → raw registry server (for install)
+const CACHE_MAX = 50;
+const SEEN_MAX = 500;
+
+function trim(map, max) {
+  while (map.size > max) map.delete(map.keys().next().value);
+}
 
 async function fetchJson(url) {
   const hit = cache.get(url);
@@ -26,7 +32,10 @@ async function fetchJson(url) {
     throw err;
   }
   const value = await res.json();
-  cache.set(url, { at: Date.now(), value });
+  const now = Date.now();
+  for (const [key, entry] of cache) if (now - entry.at >= CACHE_MS) cache.delete(key);
+  cache.set(url, { at: now, value });
+  trim(cache, CACHE_MAX);
   return value;
 }
 
@@ -181,7 +190,11 @@ function mapRegistryServer(entry) {
 
 function remember(entry) {
   const server = entry?.server;
-  if (server?.name && server?.version) seen.set(`${server.name}@${server.version}`, entry);
+  if (!server?.name || !server?.version) return;
+  const key = `${server.name}@${server.version}`;
+  seen.delete(key);
+  seen.set(key, entry);
+  trim(seen, SEEN_MAX);
 }
 
 /**
